@@ -1,0 +1,35 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+
+html, body {
+  background: #0B2E22;
+  color: #FFFFFF;
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  background: radial-gradient(1200px 800px at 20% -10%, #164A39 0%, transparent 60%),
+              radial-gradient(900px 600px at 90% 100%, #0F3D2E 0%, transparent 60%),
+              #0B2E22;
+  min-height: 100vh;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: #0B2E22; }
+::-webkit-scrollbar-thumb { background: rgba(38,208,124,0.2); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(38,208,124,0.4); }
+
+/* Splash intro */
+@keyframes zoomIn {
+  0% { opacity: 0; transform: scale(0.5); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes pulseGlow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(38,208,124,0.4); }
+  50% { box-shadow: 0 0 0 15px rgba(38,208,124,0); }
+}
