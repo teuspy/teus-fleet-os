@@ -321,7 +321,7 @@ function GastoModal({ gasto, vehiculos, choferes, proveedores, tiposGasto, onClo
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className={labelCls}>Equipo *</label>
-                <select value={form.vehiculo_id} onChange={(e) => setForm({ ...form, vehiculo_id: e.target.value })} required={form.aplica_a !== "oficina"} className={inputCls}>
+                <select value={form.vehiculo_id} onChange={(e) => setForm({ ...form, vehiculo_id: e.target.value })} required =className={inputCls}>
                   <option value="">— Elegir —</option>
                   {vehiculos.filter(v => form.aplica_a === "equipo_completo" ? v.tipo === "tracto" : v.tipo === form.aplica_a).map(v => <option key={v.id} value={v.id}>{v.nombre_equipo} · {v.chapa}</option>)}
                 </select>
