@@ -4,27 +4,32 @@
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
 
+/* Light theme - contenido principal blanco/limpio */
 html, body {
-  background: #0B2E22;
-  color: #FFFFFF;
+  background: #FAFBFA;
+  color: #0B2E22;
   font-family: 'Inter', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
 body {
-  background: radial-gradient(1200px 800px at 20% -10%, #164A39 0%, transparent 60%),
-              radial-gradient(900px 600px at 90% 100%, #0F3D2E 0%, transparent 60%),
-              #0B2E22;
+  background:
+    radial-gradient(1200px 800px at 90% -10%, #E9F5EF 0%, transparent 55%),
+    radial-gradient(900px 600px at -10% 100%, #F1FAF5 0%, transparent 55%),
+    #FAFBFA;
   min-height: 100vh;
 }
 
 /* Scrollbar */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-track { background: #0B2E22; }
-::-webkit-scrollbar-thumb { background: rgba(38,208,124,0.2); border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(38,208,124,0.4); }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(11, 46, 34, 0.15); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(11, 46, 34, 0.3); }
 
-/* Splash intro */
+/* Sidebar scrollbar (oscuro) */
+aside ::-webkit-scrollbar-thumb { background: rgba(38, 208, 124, 0.2); }
+aside ::-webkit-scrollbar-thumb:hover { background: rgba(38, 208, 124, 0.4); }
+
 @keyframes zoomIn {
   0% { opacity: 0; transform: scale(0.5); }
   100% { opacity: 1; transform: scale(1); }
@@ -32,4 +37,10 @@ body {
 @keyframes pulseGlow {
   0%, 100% { box-shadow: 0 0 0 0 rgba(38,208,124,0.4); }
   50% { box-shadow: 0 0 0 15px rgba(38,208,124,0); }
+}
+
+/* Utilidad: gradiente sutil verde para cards destacadas */
+.teus-highlight-bg {
+  background: linear-gradient(135deg, rgba(38,208,124,0.08), rgba(38,208,124,0.02));
+  border-color: rgba(38,208,124,0.35);
 }
