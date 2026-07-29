@@ -247,18 +247,20 @@ function GastoModal({ gasto, vehiculos, choferes, proveedores, tiposGasto, onClo
   const [form, setForm] = useState({
     fecha: gasto?.fecha || new Date().toISOString().split("T")[0],
     vehiculo_id: gasto?.vehiculo_id || "",
-    aplica_a: gasto?.aplica_a || "tracto",
+    aplica_a: (gasto?.aplica_a || "tracto") as string,
     tipo_gasto: gasto?.tipo_gasto || "",
     concepto: gasto?.concepto || "",
     proveedor_id: gasto?.proveedor_id || "",
     chofer_id: gasto?.chofer_id || "",
     nro_factura: gasto?.nro_factura || "",
     monto: gasto?.monto || 0,
-    tipo_mtto: gasto?.tipo_mtto || "N/A",
+    tipo_mtto: (gasto?.tipo_mtto || "N/A") as string,
     observacion: gasto?.observacion || "",
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const esOficina = form.aplica_a === "oficina";
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -266,7 +268,7 @@ function GastoModal({ gasto, vehiculos, choferes, proveedores, tiposGasto, onClo
     setError(null);
     const payload: any = {
       ...form,
-      vehiculo_id: form.aplica_a === "oficina" ? null : (form.vehiculo_id || null),
+      vehiculo_id: esOficina ? null : (form.vehiculo_id || null),
       proveedor_id: form.proveedor_id || null,
       chofer_id: form.chofer_id || null,
       concepto: form.concepto || null,
@@ -289,6 +291,11 @@ function GastoModal({ gasto, vehiculos, choferes, proveedores, tiposGasto, onClo
   const inputCls = "w-full bg-white border border-teus-border_light rounded-lg px-3 py-2 mt-1 text-sm text-teus-text_dark focus:outline-none focus:border-teus-accent focus:ring-2 focus:ring-teus-accent/20";
   const labelCls = "text-xs font-bold text-teus-text_muted uppercase tracking-wider";
 
+  const vehiculosFiltrados = vehiculos.filter(v => {
+    if (form.aplica_a === "equipo_completo") return v.tipo === "tracto";
+    return v.tipo === form.aplica_a;
+  });
+
   return (
     <div className="fixed inset-0 bg-teus-text_dark/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
       <div className="bg-white border border-teus-border_light rounded-2xl w-full max-w-2xl shadow-2xl animate-slide-up max-h-[92vh] overflow-y-auto">
@@ -304,7 +311,7 @@ function GastoModal({ gasto, vehiculos, choferes, proveedores, tiposGasto, onClo
             </div>
             <div>
               <label className={labelCls}>Aplica a *</label>
-              <select value={form.aplica_a} onChange={(e) => setForm({ ...form, aplica_a: e.target.value as any })} className={inputCls}>
+              <select value={form.aplica_a} onChange={(e) => setForm({ ...form, aplica_a: e.target.value })} className={inputCls}>
                 <option value="tracto">Tracto</option>
                 <option value="semirremolque">Semirremolque</option>
                 <option value="equipo_completo">Equipo completo</option>
@@ -317,13 +324,13 @@ function GastoModal({ gasto, vehiculos, choferes, proveedores, tiposGasto, onClo
             </div>
           </div>
 
-          {form.aplica_a !== "oficina" && (
+          {!esOficina && (
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className={labelCls}>Equipo *</label>
-                <select value={form.vehiculo_id} onChange={(e) => setForm({ ...form, vehiculo_id: e.target.value })} required =className={inputCls}>
+                <select value={form.vehiculo_id} onChange={(e) => setForm({ ...form, vehiculo_id: e.target.value })} required className={inputCls}>
                   <option value="">— Elegir —</option>
-                  {vehiculos.filter(v => form.aplica_a === "equipo_completo" ? v.tipo === "tracto" : v.tipo === form.aplica_a).map(v => <option key={v.id} value={v.id}>{v.nombre_equipo} · {v.chapa}</option>)}
+                  {vehiculosFiltrados.map(v => <option key={v.id} value={v.id}>{v.nombre_equipo} · {v.chapa}</option>)}
                 </select>
               </div>
               <div>
@@ -366,7 +373,7 @@ function GastoModal({ gasto, vehiculos, choferes, proveedores, tiposGasto, onClo
             </div>
             <div>
               <label className={labelCls}>Tipo de mantenimiento</label>
-              <select value={form.tipo_mtto} onChange={(e) => setForm({ ...form, tipo_mtto: e.target.value as any })} className={inputCls}>
+              <select value={form.tipo_mtto} onChange={(e) => setForm({ ...form, tipo_mtto: e.target.value })} className={inputCls}>
                 <option value="N/A">N/A</option>
                 <option value="Planificado">Planificado</option>
                 <option value="Imprevisto">Imprevisto</option>
