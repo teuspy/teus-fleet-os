@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
-import { Truck, Lock, Mail, Loader2 } from "lucide-react";
+import { Lock, Mail, Loader2 } from "lucide-react";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -29,7 +30,15 @@ export default function LoginPage() {
           },
         });
         if (error) throw error;
-        setError("✓ Cuenta creada. Revisá tu email para confirmar.");
+        // Intento loguear inmediatamente (email confirmation está deshabilitado)
+        const { error: loginErr } = await supabase.auth.signInWithPassword({ email, password });
+        if (!loginErr) {
+          router.push("/dashboard");
+          router.refresh();
+          return;
+        }
+        setError("✓ Cuenta creada. Ya podés iniciar sesión.");
+        setMode("login");
       } else {
         const { error } = await supabase.auth.signInWithPassword({
           email,
@@ -51,15 +60,17 @@ export default function LoginPage() {
       <div className="w-full max-w-md animate-fade-in">
         {/* Logo */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-teus-accent/10 border border-teus-accent/30 mb-4"
-               style={{ animation: "pulseGlow 2s infinite" }}>
-            <Truck className="w-8 h-8 text-teus-accent" />
+          <div className="inline-block mb-3">
+            <Image
+              src="/logo-teus-blanco.png"
+              alt="TEUS - End to end logistics"
+              width={200}
+              height={70}
+              priority
+              className="h-auto w-[200px] object-contain mx-auto"
+            />
           </div>
-          <h1 className="text-5xl font-black tracking-tight">
-            teu<span className="text-teus-accent">s</span>
-            <span className="text-teus-accent">.</span>
-          </h1>
-          <p className="text-xs text-teus-text-dim tracking-[4px] uppercase mt-2">
+          <p className="text-xs text-teus-text-dim tracking-[4px] uppercase mt-3">
             End to end logistics
           </p>
         </div>

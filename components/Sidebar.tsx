@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -70,22 +71,19 @@ export default function Sidebar({ userEmail }: { userEmail: string }) {
   return (
     <aside className="w-60 h-screen sticky top-0 bg-gradient-to-b from-teus-bg to-teus-bg-2 border-r border-teus-border flex flex-col overflow-hidden">
       {/* Brand */}
-      <div className="px-4 pt-6 pb-4 border-b border-teus-border">
-        <div className="flex items-center gap-3 px-2">
-          <div className="relative w-9 h-9 flex-shrink-0">
-            <div className="absolute top-0 left-0 w-3 h-3 bg-teus-accent rounded-sm" />
-            <div className="absolute bottom-0 right-0 w-3 h-3 bg-teus-accent rounded-sm" />
-            <div className="absolute bottom-0.5 right-4 w-2 h-2 bg-teus-accent rounded-full" />
-          </div>
-          <div>
-            <div className="text-xl font-black tracking-tight leading-none">
-              teu<span className="text-teus-accent">s</span>
-              <span className="text-teus-accent">.</span>
-            </div>
-            <div className="text-[9px] text-teus-text-dim tracking-[2px] uppercase mt-0.5">
-              Fleet OS
-            </div>
-          </div>
+      <div className="px-4 pt-5 pb-4 border-b border-teus-border">
+        <div className="flex items-center justify-center px-2">
+          <Image
+            src="/logo-teus-blanco.png"
+            alt="TEUS Fleet OS"
+            width={140}
+            height={50}
+            priority
+            className="h-auto w-[140px] object-contain"
+          />
+        </div>
+        <div className="text-[9px] text-teus-text-dim tracking-[3px] uppercase text-center mt-2">
+          Fleet OS
         </div>
       </div>
 
