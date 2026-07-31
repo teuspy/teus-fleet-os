@@ -357,6 +357,8 @@ function ViajeModal({
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [rutaSearch, setRutaSearch] = useState("");
+  const [idaYVuelta, setIdaYVuelta] = useState(true);
 
   // Auto: al elegir ruta, autocompleta origen/destino/km
   function onRutaChange(rutaId: string) {
@@ -497,19 +499,62 @@ function ViajeModal({
             <div className="flex items-center gap-2 mb-3">
               <MapPin className="w-4 h-4 text-teus-accent" />
               <div className="text-sm font-bold text-teus-text_dark">Ruta</div>
-              <div className="text-[10px] text-teus-text_muted">(al elegir una ruta, se autocompletan origen, destino y km)</div>
+              <div className="text-[10px] text-teus-text_muted">(escribí para buscar destinos)</div>
             </div>
+
+            <div className="mb-3">
+              <input
+                type="text"
+                placeholder="🔍 Buscar destino (ej: vall, cde, encarna...)"
+                value={rutaSearch}
+                onChange={(e) => setRutaSearch(e.target.value)}
+                className={inputCls}
+              />
+            </div>
+
             <div className="grid grid-cols-4 gap-3">
               <div className="col-span-4">
-                <label className={labelCls}>Ruta preseteada</label>
-                <select value={form.ruta_id} onChange={(e) => onRutaChange(e.target.value)} className={inputCls}>
+                <label className={labelCls}>
+                  Ruta preseteada
+                  {rutaSearch && (
+                    <span className="ml-2 text-teus-accent font-normal">
+                      ({[...rutas].filter(r => `${r.origen} ${r.destino}`.toLowerCase().includes(rutaSearch.toLowerCase())).length} resultados)
+                    </span>
+                  )}
+                </label>
+                <select
+                  value={form.ruta_id}
+                  onChange={(e) => {
+                    const r = rutas.find(x => x.id === e.target.value);
+                    if (r) {
+                      const km = idaYVuelta ? r.km_total : r.km_ida;
+                      setForm(f => ({ ...f, ruta_id: e.target.value, origen: r.origen, destino: r.destino, km_viaje: km }));
+                    } else {
+                      setForm(f => ({ ...f, ruta_id: e.target.value }));
+                    }
+                  }}
+                  className={inputCls}
+                >
                   <option value="">— Manual (ingresá origen/destino abajo) —</option>
-                  {rutas.map(r => <option key={r.id} value={r.id}>{r.origen} → {r.destino} · {r.km_total} km</option>)}
+                  {[...rutas]
+                    .filter(r => !rutaSearch || `${r.origen} ${r.destino}`.toLowerCase().includes(rutaSearch.toLowerCase()))
+                    .sort((a, b) => {
+                      if (a.origen === "Villeta" && b.origen !== "Villeta") return -1;
+                      if (a.origen !== "Villeta" && b.origen === "Villeta") return 1;
+                      return `${a.origen} ${a.destino}`.localeCompare(`${b.origen} ${b.destino}`);
+                    })
+                    .map(r => (
+                      <option key={r.id} value={r.id}>
+                        {r.origen} → {r.destino} · ida {r.km_ida}km / total {r.km_total}km
+                      </option>
+                    ))
+                  }
                 </select>
               </div>
+
               <div>
                 <label className={labelCls}>Origen *</label>
-                <input type="text" value={form.origen} onChange={(e) => setForm({ ...form, origen: e.target.value })} required placeholder="PSF" className={inputCls} />
+                <input type="text" value={form.origen} onChange={(e) => setForm({ ...form, origen: e.target.value })} required placeholder="Villeta" className={inputCls} />
               </div>
               <div>
                 <label className={labelCls}>Destino *</label>
@@ -520,13 +565,31 @@ function ViajeModal({
                 <input type="number" value={form.km_viaje} onChange={(e) => setForm({ ...form, km_viaje: parseInt(e.target.value) || 0 })} className={inputCls} />
               </div>
               <div className="flex items-end">
-                <div className="text-xs text-teus-text_muted bg-white border border-teus-border_light rounded-lg px-3 py-2 w-full">
-                  Ida + vuelta
-                </div>
+                <label className="flex items-center gap-2 bg-white border border-teus-border_light rounded-lg px-3 py-2 w-full cursor-pointer hover:border-teus-accent transition">
+                  <input
+                    type="checkbox"
+                    checked={idaYVuelta}
+                    onChange={(e) => {
+                      const nueva = e.target.checked;
+                      setIdaYVuelta(nueva);
+                      const r = rutas.find(x => x.id === form.ruta_id);
+                      if (r) {
+                        setForm(f => ({ ...f, km_viaje: nueva ? r.km_total : r.km_ida }));
+                      }
+                    }}
+                    className="w-4 h-4 accent-teus-accent"
+                  />
+                  <span className="text-xs font-semibold text-teus-text_dark">Ida y vuelta</span>
+                </label>
               </div>
             </div>
-          </div>
 
+            {form.ruta_id && (
+              <div className="mt-3 text-xs text-teus-text_muted bg-white/50 rounded-lg px-3 py-2">
+                💡 {idaYVuelta ? "Cuenta km ida + vuelta al contador de mantenimiento" : "Solo cuenta km de ida"}. Podés editar el KM manualmente si tuviste desvío.
+              </div>
+            )}
+          </div>
           {/* Combustible */}
           <div className="bg-teus-hover_light border border-teus-border_light rounded-xl p-4">
             <div className="flex items-center gap-2 mb-3">
