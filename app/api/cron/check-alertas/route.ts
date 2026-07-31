@@ -42,19 +42,38 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const esTest = url.searchParams.get("test") === "1";
 
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  const debug: any = {
+    tiene_url: !!supabaseUrl,
+    tiene_service_key: !!serviceKey,
+    service_key_prefix: serviceKey ? serviceKey.substring(0, 12) + "..." : null,
+  };
+
+  if (!supabaseUrl || !serviceKey) {
+    return NextResponse.json({
+      success: false,
+      error: "Faltan variables de entorno",
+      debug,
+    }, { status: 500 });
+  }
+
+  const supabase = createClient(supabaseUrl, serviceKey);
 
   const alertas: string[] = [];
   const ahora = new Date();
   let hayCritico = false;
 
-  const { data: vehiculos } = await supabase
+  // 1) MANTENIMIENTOS
+  const { data: vehiculos, error: errVeh } = await supabase
     .from("v_vehiculos_km")
     .select("*")
     .order("km_restantes");
+
+  debug.vehiculos_count = vehiculos?.length ?? 0;
+  debug.vehiculos_error = errVeh?.message ?? null;
+  debug.vehiculos_raw = vehiculos;
 
   if (vehiculos) {
     for (const v of vehiculos as VehKm[]) {
@@ -70,10 +89,14 @@ export async function GET(request: Request) {
     }
   }
 
-  const { data: habs } = await supabase
+  // 2) HABILITACIONES
+  const { data: habs, error: errHab } = await supabase
     .from("habilitaciones")
     .select("id, tipo, fecha_vencimiento, nro_certificado, vehiculos(chapa, alias)")
     .not("fecha_vencimiento", "is", null);
+
+  debug.habs_count = habs?.length ?? 0;
+  debug.habs_error = errHab?.message ?? null;
 
   if (habs) {
     for (const h of habs as unknown as Habilitacion[]) {
@@ -124,5 +147,6 @@ export async function GET(request: Request) {
     notificacion_enviada: enviadoOk,
     tipo_prioridad: hayCritico ? "urgent" : "high",
     alertas,
+    debug,
   });
 }
