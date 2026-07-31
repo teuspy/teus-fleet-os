@@ -255,7 +255,7 @@ export default function ViajesPage() {
                 {filtered.map((v) => (
                   <tr key={v.id} className="border-b border-teus-border_light/60 hover:bg-teus-hover_light transition">
                     <td className="px-3 py-3 text-teus-text_dark font-semibold text-xs whitespace-nowrap">
-                      {new Date(v.fecha).toLocaleDateString("es-PY", { day: "2-digit", month: "2-digit" })}
+                      {(() => { const [y,m,d] = v.fecha.split("T")[0].split("-"); return `${d}/${m}`; })()}
                     </td>
                     <td className="px-3 py-3 font-bold text-teus-text_dark">{v.vehiculo?.nombre_equipo || "—"}</td>
                     <td className="px-3 py-3 text-xs text-teus-text_muted">{v.chofer?.nombre_completo || "—"}</td>
