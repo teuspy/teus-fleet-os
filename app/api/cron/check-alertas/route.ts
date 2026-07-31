@@ -21,20 +21,23 @@ type Habilitacion = {
 };
 
 async function enviarNtfy(titulo: string, mensaje: string, prioridad: "high" | "urgent" | "default" = "high") {
+  const priorityMap = { urgent: 5, high: 4, default: 3 };
   try {
-    const res = await fetch(`https://ntfy.sh/${NTFY_TOPIC}`, {
+    const res = await fetch(`https://ntfy.sh`, {
       method: "POST",
-      headers: {
-        "Title": titulo,
-        "Priority": prioridad,
-        "Tags": "truck,warning",
-      },
-      body: mensaje,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        topic: NTFY_TOPIC,
+        title: titulo,
+        message: mensaje,
+        priority: priorityMap[prioridad] || 3,
+        tags: ["truck", "warning"],
+      }),
     });
-    return res.ok;
-  } catch (err) {
-    console.error("Error ntfy:", err);
-    return false;
+    const text = await res.text();
+    return { ok: res.ok, status: res.status, body: text.substring(0, 200) };
+  } catch (err: any) {
+    return { ok: false, error: err?.message ?? String(err) };
   }
 }
 
@@ -48,7 +51,6 @@ export async function GET(request: Request) {
   const debug: any = {
     tiene_url: !!supabaseUrl,
     tiene_service_key: !!serviceKey,
-    service_key_prefix: serviceKey ? serviceKey.substring(0, 12) + "..." : null,
   };
 
   if (!supabaseUrl || !serviceKey) {
@@ -65,7 +67,6 @@ export async function GET(request: Request) {
   const ahora = new Date();
   let hayCritico = false;
 
-  // 1) MANTENIMIENTOS
   const { data: vehiculos, error: errVeh } = await supabase
     .from("v_vehiculos_km")
     .select("*")
@@ -73,7 +74,6 @@ export async function GET(request: Request) {
 
   debug.vehiculos_count = vehiculos?.length ?? 0;
   debug.vehiculos_error = errVeh?.message ?? null;
-  debug.vehiculos_raw = vehiculos;
 
   if (vehiculos) {
     for (const v of vehiculos as VehKm[]) {
@@ -89,7 +89,6 @@ export async function GET(request: Request) {
     }
   }
 
-  // 2) HABILITACIONES
   const { data: habs, error: errHab } = await supabase
     .from("habilitaciones")
     .select("id, tipo, fecha_vencimiento, nro_certificado, vehiculos(chapa, alias)")
@@ -127,13 +126,13 @@ export async function GET(request: Request) {
     }
   }
 
-  let enviadoOk = false;
+  let ntfyResult: any = null;
   if (alertas.length > 0) {
     const titulo = `🚛 TEUS FLEET — ${alertas.length} alerta${alertas.length > 1 ? "s" : ""}`;
     const mensaje = alertas.join("\n\n");
-    enviadoOk = await enviarNtfy(titulo, mensaje, hayCritico ? "urgent" : "high");
+    ntfyResult = await enviarNtfy(titulo, mensaje, hayCritico ? "urgent" : "high");
   } else if (esTest) {
-    enviadoOk = await enviarNtfy(
+    ntfyResult = await enviarNtfy(
       "🚛 TEUS FLEET — Sistema OK",
       "✅ No hay alertas pendientes.\nTodos los vehículos y habilitaciones están al día.\n\nEste mensaje es una prueba del sistema.",
       "default"
@@ -144,7 +143,8 @@ export async function GET(request: Request) {
     success: true,
     fecha: ahora.toISOString(),
     total_alertas: alertas.length,
-    notificacion_enviada: enviadoOk,
+    notificacion_enviada: !!ntfyResult?.ok,
+    ntfy_debug: ntfyResult,
     tipo_prioridad: hayCritico ? "urgent" : "high",
     alertas,
     debug,
