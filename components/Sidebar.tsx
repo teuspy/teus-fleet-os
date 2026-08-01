@@ -18,6 +18,10 @@ import {
   Settings,
   LogOut,
   Bell,
+  Trophy,
+  Award,
+  BarChart3,
+  Medal,
 } from "lucide-react";
 
 const navSections = [
@@ -28,6 +32,15 @@ const navSections = [
       { href: "/viajes", label: "Producción / Viajes", icon: ClipboardList },
       { href: "/gastos", label: "Gastos de Flota", icon: DollarSign },
       { href: "/facturas", label: "Facturas y Cobros", icon: FileText },
+    ],
+  },
+  {
+    title: "Rankings",
+    items: [
+      { href: "/rankings/equipos", label: "Ranking Equipos", icon: Trophy },
+      { href: "/rankings/choferes", label: "Ranking Choferes", icon: Medal },
+      { href: "/rankings/clientes", label: "Ranking Clientes", icon: Award },
+      { href: "/rankings/gastos", label: "Ranking Gastos", icon: BarChart3 },
     ],
   },
   {
