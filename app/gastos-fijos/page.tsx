@@ -2,13 +2,14 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Plus, Edit2, Power, Trash2, X, DollarSign, Loader2, Building2, Users, Shield, Wrench, Briefcase } from "lucide-react";
+import { Plus, Edit2, Power, Trash2, X, DollarSign, Loader2, Users, Shield, Wrench, Briefcase, Truck, Home } from "lucide-react";
 
 type Proveedor = { id: string; nombre: string };
 type GastoFijo = {
   id: string;
   concepto: string;
   categoria: "financiero" | "salarios" | "seguros" | "operativos" | "administrativos";
+  aplica_a: "equipos" | "oficina";
   monto_mensual: number;
   moneda: string | null;
   proveedor_id: string | null;
@@ -41,10 +42,11 @@ export default function GastosFijosPage() {
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<GastoFijo | null>(null);
   const [filter, setFilter] = useState<"activos" | "todos">("activos");
+  const [aplicaFilter, setAplicaFilter] = useState<"todos" | "equipos" | "oficina">("todos");
 
   async function loadData() {
     setLoading(true);
-    let query = supabase.from("gastos_fijos").select("*, proveedor:proveedor_id(id, nombre)").order("categoria").order("concepto");
+    let query = supabase.from("gastos_fijos").select("*, proveedor:proveedor_id(id, nombre)").order("aplica_a").order("categoria").order("concepto");
     if (filter === "activos") query = query.eq("activo", true);
     const [{ data: gfData }, { data: provData }] = await Promise.all([
       query,
@@ -57,25 +59,29 @@ export default function GastosFijosPage() {
 
   useEffect(() => { loadData(); }, [filter]);
 
+  const filtered = useMemo(() => {
+    if (aplicaFilter === "todos") return gastos;
+    return gastos.filter(g => g.aplica_a === aplicaFilter);
+  }, [gastos, aplicaFilter]);
+
   const totales = useMemo(() => {
     const activos = gastos.filter(g => g.activo);
-    const total = activos.reduce((s, g) => s + Number(g.monto_mensual || 0), 0);
-    const porCategoria: Record<string, number> = {};
-    activos.forEach(g => {
-      porCategoria[g.categoria] = (porCategoria[g.categoria] || 0) + Number(g.monto_mensual || 0);
-    });
-    return { total, porCategoria, cantidad: activos.length };
+    const equipos = activos.filter(g => g.aplica_a === "equipos");
+    const oficina = activos.filter(g => g.aplica_a === "oficina");
+    const totalEquipos = equipos.reduce((s, g) => s + Number(g.monto_mensual || 0), 0);
+    const totalOficina = oficina.reduce((s, g) => s + Number(g.monto_mensual || 0), 0);
+    return { totalEquipos, totalOficina, total: totalEquipos + totalOficina, cantidadEq: equipos.length, cantidadOf: oficina.length };
   }, [gastos]);
 
   async function toggleActivo(g: GastoFijo) {
     const nuevoEstado = !g.activo;
-    if (!confirm(nuevoEstado ? `¿Reactivar "${g.concepto}"?` : `¿Desactivar "${g.concepto}"?\nDeja de sumar al total mensual.`)) return;
+    if (!confirm(nuevoEstado ? `¿Reactivar "${g.concepto}"?` : `¿Desactivar "${g.concepto}"?`)) return;
     await supabase.from("gastos_fijos").update({ activo: nuevoEstado }).eq("id", g.id);
     loadData();
   }
 
   async function eliminar(g: GastoFijo) {
-    if (!confirm(`¿ELIMINAR permanentemente "${g.concepto}"?\nEsta acción NO se puede deshacer.`)) return;
+    if (!confirm(`¿ELIMINAR permanentemente "${g.concepto}"?`)) return;
     await supabase.from("gastos_fijos").delete().eq("id", g.id);
     loadData();
   }
@@ -88,7 +94,7 @@ export default function GastosFijosPage() {
             <DollarSign className="w-8 h-8 text-teus-accent" />
             Gastos Fijos Mensuales
           </h1>
-          <p className="text-sm text-teus-text_muted mt-1">Costos fijos que se prorratean entre los 6 tractocamiones para calcular utilidad neta</p>
+          <p className="text-sm text-teus-text_muted mt-1">Solo los gastos con "Aplica a: Equipos" prorratean al ranking de tractos</p>
         </div>
         <button onClick={() => { setEditing(null); setShowModal(true); }}
           className="bg-teus-accent hover:bg-teus-accent-2 text-white font-bold px-5 py-2.5 rounded-lg shadow-accent-glow transition-all hover:-translate-y-0.5 text-sm flex items-center gap-2">
@@ -96,49 +102,49 @@ export default function GastosFijosPage() {
         </button>
       </div>
 
-      {/* KPI grande */}
-      <div className="bg-gradient-to-r from-teus-danger to-red-600 rounded-2xl p-6 mb-6 shadow-xl text-white">
-        <div className="text-xs font-bold uppercase tracking-widest opacity-80">Total mensual activo</div>
-        <div className="text-5xl font-black mt-2">{fmtGs(totales.total)}</div>
-        <div className="text-sm opacity-80 mt-2">
-          {totales.cantidad} gastos fijos activos ·
-          Prorrateo entre 6 equipos: <strong>{fmtGs(totales.total / 6)}</strong> por equipo/mes
+      <div className="grid grid-cols-2 gap-4 mb-6">
+        <div className="bg-gradient-to-br from-teus-accent to-green-600 rounded-2xl p-5 shadow-xl text-white">
+          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest opacity-80">
+            <Truck className="w-4 h-4" /> Aplica a EQUIPOS (prorratea)
+          </div>
+          <div className="text-4xl font-black mt-2">{fmtGs(totales.totalEquipos)}</div>
+          <div className="text-xs opacity-80 mt-1">
+            {totales.cantidadEq} gastos · Prorrateo por equipo: <strong>{fmtGs(totales.totalEquipos / 6)}</strong>/mes
+          </div>
+        </div>
+        <div className="bg-gradient-to-br from-gray-600 to-gray-800 rounded-2xl p-5 shadow-xl text-white">
+          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest opacity-80">
+            <Home className="w-4 h-4" /> Aplica a OFICINA (empresa)
+          </div>
+          <div className="text-4xl font-black mt-2">{fmtGs(totales.totalOficina)}</div>
+          <div className="text-xs opacity-80 mt-1">
+            {totales.cantidadOf} gastos · NO afecta ranking, sí afecta utilidad total empresa
+          </div>
         </div>
       </div>
 
-      {/* Desglose por categoría */}
-      <div className="grid grid-cols-5 gap-3 mb-6">
-        {Object.entries(CATEGORIAS).map(([key, cat]) => {
-          const Icon = cat.icon;
-          const monto = totales.porCategoria[key] || 0;
-          const pct = totales.total > 0 ? (monto / totales.total * 100) : 0;
-          return (
-            <div key={key} className={`border rounded-xl p-3 ${cat.color}`}>
-              <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider">
-                <Icon className="w-4 h-4" />
-                {cat.label.split(" ")[0]}
-              </div>
-              <div className="text-xl font-black mt-1">{fmtGsShort(monto)}</div>
-              <div className="text-[10px] opacity-70 mt-0.5">{pct.toFixed(0)}% del total</div>
-            </div>
-          );
-        })}
+      <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 mb-6 text-xs text-blue-800">
+        💡 <strong>Total gastos fijos empresa:</strong> {fmtGs(totales.total)}/mes ·
+        Los de <strong>equipos ({fmtGs(totales.totalEquipos)})</strong> se dividen entre 6 para calcular utilidad neta de cada tracto.
+        Los de <strong>oficina ({fmtGs(totales.totalOficina)})</strong> se restan del total de la empresa, no del ranking.
       </div>
 
-      {/* Filtro activos/todos */}
-      <div className="flex items-center gap-2 mb-4">
-        <button onClick={() => setFilter("activos")} className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${filter === "activos" ? "bg-teus-accent text-white" : "bg-white border border-teus-border_light text-teus-text_muted"}`}>Solo activos</button>
-        <button onClick={() => setFilter("todos")} className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${filter === "todos" ? "bg-teus-accent text-white" : "bg-white border border-teus-border_light text-teus-text_muted"}`}>Todos (incluye inactivos)</button>
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        <button onClick={() => setAplicaFilter("todos")} className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${aplicaFilter === "todos" ? "bg-teus-text_dark text-white" : "bg-white border border-teus-border_light"}`}>Todos ({gastos.length})</button>
+        <button onClick={() => setAplicaFilter("equipos")} className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${aplicaFilter === "equipos" ? "bg-teus-accent text-white" : "bg-white border border-teus-border_light"}`}>🚛 Solo Equipos</button>
+        <button onClick={() => setAplicaFilter("oficina")} className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${aplicaFilter === "oficina" ? "bg-gray-700 text-white" : "bg-white border border-teus-border_light"}`}>🏢 Solo Oficina</button>
+        <div className="w-px h-6 bg-teus-border_light mx-2" />
+        <button onClick={() => setFilter("activos")} className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${filter === "activos" ? "bg-teus-accent text-white" : "bg-white border border-teus-border_light"}`}>Activos</button>
+        <button onClick={() => setFilter("todos")} className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${filter === "todos" ? "bg-teus-accent text-white" : "bg-white border border-teus-border_light"}`}>Incluir inactivos</button>
       </div>
 
-      {/* Tabla */}
       <div className="bg-teus-card_light border border-teus-border_light rounded-xl overflow-hidden shadow-card">
         {loading ? (
           <div className="p-12 text-center text-teus-text_muted"><Loader2 className="w-8 h-8 animate-spin mx-auto mb-2" />Cargando...</div>
-        ) : gastos.length === 0 ? (
+        ) : filtered.length === 0 ? (
           <div className="p-16 text-center text-teus-text_muted">
             <DollarSign className="w-12 h-12 text-teus-text_soft mx-auto mb-3" />
-            <div className="text-lg font-bold">Aún no cargaste gastos fijos</div>
+            <div className="text-lg font-bold">Sin gastos fijos cargados</div>
             <div className="text-sm mt-2">Click en "+ Nuevo Gasto Fijo" para arrancar</div>
           </div>
         ) : (
@@ -146,6 +152,7 @@ export default function GastosFijosPage() {
             <thead className="bg-teus-bg_soft text-xs uppercase text-teus-text_muted">
               <tr>
                 <th className="text-left px-4 py-3">Concepto</th>
+                <th className="text-left px-4 py-3">Aplica a</th>
                 <th className="text-left px-4 py-3">Categoría</th>
                 <th className="text-left px-4 py-3">Proveedor</th>
                 <th className="text-right px-4 py-3">Monto mensual</th>
@@ -154,12 +161,17 @@ export default function GastosFijosPage() {
               </tr>
             </thead>
             <tbody>
-              {gastos.map(g => (
+              {filtered.map(g => (
                 <tr key={g.id} className={`border-t border-teus-border_light hover:bg-teus-bg_soft/50 ${!g.activo ? "opacity-50" : ""}`}>
                   <td className="px-4 py-3 font-bold text-teus-text_dark">{g.concepto}</td>
                   <td className="px-4 py-3">
+                    <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase ${g.aplica_a === "equipos" ? "bg-teus-accent/20 text-teus-accent-dark" : "bg-gray-200 text-gray-700"}`}>
+                      {g.aplica_a === "equipos" ? "🚛 Equipos" : "🏢 Oficina"}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
                     <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase ${CATEGORIAS[g.categoria]?.color || ""}`}>
-                      {CATEGORIAS[g.categoria]?.label || g.categoria}
+                      {CATEGORIAS[g.categoria]?.label.split(" ")[0] || g.categoria}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-xs text-teus-text_muted">{g.proveedor?.nombre || "-"}</td>
@@ -193,6 +205,7 @@ function GastoFijoModal({ gasto, proveedores, onClose }: { gasto: GastoFijo | nu
   const [form, setForm] = useState({
     concepto: gasto?.concepto || "",
     categoria: gasto?.categoria || "operativos",
+    aplica_a: gasto?.aplica_a || "equipos",
     monto_mensual: gasto?.monto_mensual?.toString() || "",
     proveedor_id: gasto?.proveedor_id || "",
     observacion: gasto?.observacion || "",
@@ -206,6 +219,7 @@ function GastoFijoModal({ gasto, proveedores, onClose }: { gasto: GastoFijo | nu
     const payload = {
       concepto: form.concepto.trim(),
       categoria: form.categoria,
+      aplica_a: form.aplica_a,
       monto_mensual: parseInt(form.monto_mensual) || 0,
       proveedor_id: form.proveedor_id || null,
       observacion: form.observacion.trim() || null,
@@ -232,9 +246,26 @@ function GastoFijoModal({ gasto, proveedores, onClose }: { gasto: GastoFijo | nu
           <div>
             <label className="text-xs font-bold text-teus-text_muted uppercase">Concepto *</label>
             <input required value={form.concepto} onChange={(e) => setForm({ ...form, concepto: e.target.value })}
-              placeholder="Ej: Cuota BNF, Salario chofer, Seguro camión..."
+              placeholder="Ej: Cuota BNF, Salario chofer, Alquiler oficina..."
               className="w-full mt-1 px-3 py-2 border rounded-lg text-sm focus:border-teus-accent outline-none" />
           </div>
+
+          <div>
+            <label className="text-xs font-bold text-teus-text_muted uppercase">Aplica a * (afecta ranking)</label>
+            <div className="grid grid-cols-2 gap-2 mt-1">
+              <button type="button" onClick={() => setForm({ ...form, aplica_a: "equipos" })}
+                className={`p-3 rounded-lg border-2 text-sm text-left transition ${form.aplica_a === "equipos" ? "border-teus-accent bg-teus-accent/10" : "border-teus-border_light bg-white"}`}>
+                <div className="font-bold flex items-center gap-2">🚛 EQUIPOS</div>
+                <div className="text-xs text-teus-text_muted mt-1">Se prorratea entre los 6 tractocamiones. Ej: préstamos, salario chofer, GPS, seguro camión.</div>
+              </button>
+              <button type="button" onClick={() => setForm({ ...form, aplica_a: "oficina" })}
+                className={`p-3 rounded-lg border-2 text-sm text-left transition ${form.aplica_a === "oficina" ? "border-gray-700 bg-gray-100" : "border-teus-border_light bg-white"}`}>
+                <div className="font-bold flex items-center gap-2">🏢 OFICINA</div>
+                <div className="text-xs text-teus-text_muted mt-1">NO afecta ranking equipos. Ej: alquiler, contador, IPS, salario admin, movilidades.</div>
+              </button>
+            </div>
+          </div>
+
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="text-xs font-bold text-teus-text_muted uppercase">Categoría *</label>
@@ -251,6 +282,7 @@ function GastoFijoModal({ gasto, proveedores, onClose }: { gasto: GastoFijo | nu
               {parseInt(form.monto_mensual) > 0 && <div className="text-xs text-teus-accent font-bold mt-1">= {fmtGs(parseInt(form.monto_mensual))}</div>}
             </div>
           </div>
+
           <div>
             <label className="text-xs font-bold text-teus-text_muted uppercase">Proveedor (opcional)</label>
             <select value={form.proveedor_id} onChange={(e) => setForm({ ...form, proveedor_id: e.target.value })}
@@ -262,7 +294,6 @@ function GastoFijoModal({ gasto, proveedores, onClose }: { gasto: GastoFijo | nu
           <div>
             <label className="text-xs font-bold text-teus-text_muted uppercase">Observaciones</label>
             <textarea rows={2} value={form.observacion} onChange={(e) => setForm({ ...form, observacion: e.target.value })}
-              placeholder="Detalles adicionales..."
               className="w-full mt-1 px-3 py-2 border rounded-lg text-sm focus:border-teus-accent outline-none" />
           </div>
           {err && <div className="text-sm text-red-600 bg-red-50 p-3 rounded">{err}</div>}
