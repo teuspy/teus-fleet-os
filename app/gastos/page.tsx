@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Plus, Edit2, Trash2, X, DollarSign, Search, Loader2, Calendar, TrendingDown, Truck } from "lucide-react";
 
-type Vehiculo = { id: string; nombre_equipo: string; tipo: string; chapa: string };
+type Vehiculo = { id: string; nombre_equipo: string; tipo: string; chapa: string; alias: string | null };
 type Chofer = { id: string; nombre_completo: string };
 type Proveedor = { id: string; nombre: string; tipo: string | null };
 type TipoGasto = { id: string; nombre: string };
@@ -62,6 +62,7 @@ export default function GastosPage() {
   const [search, setSearch] = useState("");
   const [filterEquipo, setFilterEquipo] = useState<string>("");
   const [filterTipo, setFilterTipo] = useState<string>("");
+  const [filterAplicaA, setFilterAplicaA] = useState<string>("");
 
   async function loadData() {
     setLoading(true);
@@ -69,8 +70,8 @@ export default function GastosPage() {
     const endDate = new Date(year, month, 0).toISOString().split("T")[0];
 
     const [{ data: gastosData }, { data: vehData }, { data: chofData }, { data: provData }, { data: tgData }] = await Promise.all([
-      supabase.from("gastos").select("*, vehiculo:vehiculo_id(id, nombre_equipo, tipo, chapa), proveedor:proveedor_id(id, nombre, tipo), chofer:chofer_id(id, nombre_completo)").gte("fecha", startDate).lte("fecha", endDate).order("fecha", { ascending: false }),
-      supabase.from("vehiculos").select("id, nombre_equipo, tipo, chapa").eq("activo", true).order("nombre_equipo"),
+      supabase.from("gastos").select("*, vehiculo:vehiculo_id(id, nombre_equipo, tipo, chapa, alias), proveedor:proveedor_id(id, nombre, tipo), chofer:chofer_id(id, nombre_completo)").gte("fecha", startDate).lte("fecha", endDate).order("fecha", { ascending: false }),
+      supabase.from("vehiculos").select("id, nombre_equipo, tipo, chapa, alias").eq("activo", true).order("alias"),
       supabase.from("choferes").select("id, nombre_completo").eq("activo", true).order("nombre_completo"),
       supabase.from("proveedores").select("id, nombre, tipo").eq("activo", true).order("nombre"),
       supabase.from("tipos_gasto").select("id, nombre").eq("activo", true).order("nombre"),
@@ -86,15 +87,16 @@ export default function GastosPage() {
   useEffect(() => { loadData(); }, [year, month]);
 
   const filtered = useMemo(() => gastos.filter(g => {
-    if (filterEquipo && g.vehiculo_id !== filterEquipo) return false;
+    if (filterEquipo && g.vehiculo?.alias !== filterEquipo) return false;
     if (filterTipo && g.tipo_gasto !== filterTipo) return false;
+    if (filterAplicaA && g.aplica_a !== filterAplicaA) return false;
     if (search) {
       const q = search.toLowerCase();
-      const s = `${g.vehiculo?.nombre_equipo || ""} ${g.proveedor?.nombre || ""} ${g.tipo_gasto} ${g.concepto || ""} ${g.nro_factura || ""}`.toLowerCase();
+      const s = `${g.vehiculo?.alias || ""} ${g.vehiculo?.nombre_equipo || ""} ${g.proveedor?.nombre || ""} ${g.tipo_gasto} ${g.concepto || ""} ${g.nro_factura || ""}`.toLowerCase();
       if (!s.includes(q)) return false;
     }
     return true;
-  }), [gastos, filterEquipo, filterTipo, search]);
+  }), [gastos, filterEquipo, filterTipo, filterAplicaA, search]);
 
   const totales = useMemo(() => {
     const total = filtered.reduce((s, g) => s + (g.monto || 0), 0);
@@ -120,29 +122,39 @@ export default function GastosPage() {
           </h1>
           <p className="text-sm text-teus-text_muted mt-1">Gastos variables por vehículo y oficina</p>
         </div>
-        <button onClick={() => { setEditing(null); setShowModal(true); }} className="bg-teus-accent hover:bg-teus-accent-2 text-white font-bold px-5 py-2.5 rounded-lg shadow-accent-glow transition-all hover:-translate-y-0.5 text-sm flex items-center gap-2">
-          <Plus className="w-4 h-4" />Nuevo Gasto
+        <button onClick={() => { setEditing(null); setShowModal(true); }} className="bg-teus-accent hover:bg-teus-accent-2 text-white font-bold px-5 py-2.5 rounded-xl shadow-accent-glow transition-all hover:-translate-y-0.5 text-sm flex items-center gap-2">
+          <Plus className="w-4 h-4" /> Nuevo Gasto
         </button>
       </div>
 
-      <div className="bg-teus-card_light border border-teus-border_light rounded-xl p-4 mb-4 flex flex-wrap items-center gap-3 shadow-card">
-        <div className="flex items-center gap-2 text-teus-text_muted text-sm font-bold">
-          <Calendar className="w-4 h-4" />Período:
+      <div className="bg-teus-card_light border border-teus-border_light rounded-xl p-4 mb-4 flex flex-wrap items-center justify-between gap-3 shadow-card">
+        <div className="flex items-center gap-3">
+          <Calendar className="w-4 h-4 text-teus-accent" />
+          <span className="text-xs font-bold text-teus-text_muted uppercase tracking-wider">Período:</span>
+          <select value={month} onChange={(e) => setMonth(Number(e.target.value))} className="bg-white border border-teus-border_light rounded-lg px-3 py-2 text-sm text-teus-text_dark font-semibold focus:outline-none focus:border-teus-accent focus:ring-2 focus:ring-teus-accent/20">
+            {MESES_ES.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
+          </select>
+          <select value={year} onChange={(e) => setYear(Number(e.target.value))} className="bg-white border border-teus-border_light rounded-lg px-3 py-2 text-sm text-teus-text_dark font-semibold focus:outline-none focus:border-teus-accent focus:ring-2 focus:ring-teus-accent/20">
+            {[2025, 2026, 2027].map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
         </div>
-        <select value={month} onChange={(e) => setMonth(+e.target.value)} className="bg-white border border-teus-border_light rounded-lg px-3 py-2 text-sm text-teus-text_dark focus:outline-none focus:border-teus-accent focus:ring-2 focus:ring-teus-accent/20 font-semibold">
-          {MESES_ES.map((m, i) => <option key={i} value={i+1}>{m}</option>)}
-        </select>
-        <select value={year} onChange={(e) => setYear(+e.target.value)} className="bg-white border border-teus-border_light rounded-lg px-3 py-2 text-sm text-teus-text_dark focus:outline-none focus:border-teus-accent focus:ring-2 focus:ring-teus-accent/20 font-semibold">
-          {[2024,2025,2026,2027].map(y => <option key={y} value={y}>{y}</option>)}
-        </select>
-        <div className="ml-auto flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-3">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-teus-text_soft" />
             <input type="text" placeholder="Buscar..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-56 bg-white border border-teus-border_light rounded-lg px-9 py-2 text-sm text-teus-text_dark placeholder-teus-text_soft focus:outline-none focus:border-teus-accent focus:ring-2 focus:ring-teus-accent/20" />
           </div>
           <select value={filterEquipo} onChange={(e) => setFilterEquipo(e.target.value)} className="bg-white border border-teus-border_light rounded-lg px-3 py-2 text-sm text-teus-text_dark focus:outline-none focus:border-teus-accent focus:ring-2 focus:ring-teus-accent/20">
             <option value="">Todos los equipos</option>
-            {vehiculos.map(v => <option key={v.id} value={v.id}>{v.nombre_equipo} · {v.tipo}</option>)}
+            {Array.from(new Set(vehiculos.map(v => v.alias).filter(Boolean))).sort().map(alias => (
+              <option key={alias} value={alias!}>{alias} (equipo completo)</option>
+            ))}
+          </select>
+          <select value={filterAplicaA} onChange={(e) => setFilterAplicaA(e.target.value)} className="bg-white border border-teus-border_light rounded-lg px-3 py-2 text-sm text-teus-text_dark focus:outline-none focus:border-teus-accent focus:ring-2 focus:ring-teus-accent/20">
+            <option value="">Todos (aplica a)</option>
+            <option value="tracto">Solo Tracto</option>
+            <option value="semirremolque">Solo Semirremolque</option>
+            <option value="equipo_completo">Solo Equipo completo</option>
+            <option value="oficina">Solo Oficina</option>
           </select>
           <select value={filterTipo} onChange={(e) => setFilterTipo(e.target.value)} className="bg-white border border-teus-border_light rounded-lg px-3 py-2 text-sm text-teus-text_dark focus:outline-none focus:border-teus-accent focus:ring-2 focus:ring-teus-accent/20">
             <option value="">Todos los tipos</option>
@@ -206,8 +218,8 @@ export default function GastosPage() {
               <tbody>
                 {filtered.map((g) => (
                   <tr key={g.id} className="border-b border-teus-border_light/60 hover:bg-teus-hover_light transition">
-                    <td className="px-3 py-3 text-teus-text_dark font-semibold text-xs whitespace-nowrap">{new Date(g.fecha).toLocaleDateString("es-PY", { day: "2-digit", month: "2-digit" })}</td>
-                    <td className="px-3 py-3 font-bold text-teus-text_dark">{g.vehiculo?.nombre_equipo || "—"}</td>
+                    <td className="px-3 py-3 text-teus-text_dark font-semibold text-xs whitespace-nowrap">{(() => { const [y,m,d] = g.fecha.split("T")[0].split("-"); return `${d}/${m}`; })()}</td>
+                    <td className="px-3 py-3 font-bold text-teus-text_dark">{g.vehiculo?.alias || g.vehiculo?.nombre_equipo || "—"}</td>
                     <td className="px-3 py-3">
                       {g.aplica_a && (
                         <span className={`inline-flex items-center text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded ${APLICA_A[g.aplica_a]?.classes || ""}`}>{APLICA_A[g.aplica_a]?.label || g.aplica_a}</span>
@@ -247,20 +259,18 @@ function GastoModal({ gasto, vehiculos, choferes, proveedores, tiposGasto, onClo
   const [form, setForm] = useState({
     fecha: gasto?.fecha || new Date().toISOString().split("T")[0],
     vehiculo_id: gasto?.vehiculo_id || "",
-    aplica_a: (gasto?.aplica_a || "tracto") as string,
+    aplica_a: gasto?.aplica_a || "tracto",
     tipo_gasto: gasto?.tipo_gasto || "",
     concepto: gasto?.concepto || "",
     proveedor_id: gasto?.proveedor_id || "",
     chofer_id: gasto?.chofer_id || "",
     nro_factura: gasto?.nro_factura || "",
     monto: gasto?.monto || 0,
-    tipo_mtto: (gasto?.tipo_mtto || "N/A") as string,
+    tipo_mtto: gasto?.tipo_mtto || "N/A",
     observacion: gasto?.observacion || "",
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const esOficina = form.aplica_a === "oficina";
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -268,7 +278,7 @@ function GastoModal({ gasto, vehiculos, choferes, proveedores, tiposGasto, onClo
     setError(null);
     const payload: any = {
       ...form,
-      vehiculo_id: esOficina ? null : (form.vehiculo_id || null),
+      vehiculo_id: form.aplica_a === "oficina" ? null : (form.vehiculo_id || null),
       proveedor_id: form.proveedor_id || null,
       chofer_id: form.chofer_id || null,
       concepto: form.concepto || null,
@@ -291,11 +301,6 @@ function GastoModal({ gasto, vehiculos, choferes, proveedores, tiposGasto, onClo
   const inputCls = "w-full bg-white border border-teus-border_light rounded-lg px-3 py-2 mt-1 text-sm text-teus-text_dark focus:outline-none focus:border-teus-accent focus:ring-2 focus:ring-teus-accent/20";
   const labelCls = "text-xs font-bold text-teus-text_muted uppercase tracking-wider";
 
-  const vehiculosFiltrados = vehiculos.filter(v => {
-    if (form.aplica_a === "equipo_completo") return v.tipo === "tracto";
-    return v.tipo === form.aplica_a;
-  });
-
   return (
     <div className="fixed inset-0 bg-teus-text_dark/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
       <div className="bg-white border border-teus-border_light rounded-2xl w-full max-w-2xl shadow-2xl animate-slide-up max-h-[92vh] overflow-y-auto">
@@ -311,7 +316,7 @@ function GastoModal({ gasto, vehiculos, choferes, proveedores, tiposGasto, onClo
             </div>
             <div>
               <label className={labelCls}>Aplica a *</label>
-              <select value={form.aplica_a} onChange={(e) => setForm({ ...form, aplica_a: e.target.value })} className={inputCls}>
+              <select value={form.aplica_a} onChange={(e) => setForm({ ...form, aplica_a: e.target.value as any })} className={inputCls}>
                 <option value="tracto">Tracto</option>
                 <option value="semirremolque">Semirremolque</option>
                 <option value="equipo_completo">Equipo completo</option>
@@ -324,13 +329,13 @@ function GastoModal({ gasto, vehiculos, choferes, proveedores, tiposGasto, onClo
             </div>
           </div>
 
-          {!esOficina && (
+          {form.aplica_a !== "oficina" && (
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className={labelCls}>Equipo *</label>
                 <select value={form.vehiculo_id} onChange={(e) => setForm({ ...form, vehiculo_id: e.target.value })} required className={inputCls}>
                   <option value="">— Elegir —</option>
-                  {vehiculosFiltrados.map(v => <option key={v.id} value={v.id}>{v.nombre_equipo} · {v.chapa}</option>)}
+                  {vehiculos.filter(v => form.aplica_a === "equipo_completo" ? v.tipo === "tracto" : v.tipo === form.aplica_a).map(v => <option key={v.id} value={v.id}>{v.alias || v.nombre_equipo} · {v.chapa}</option>)}
                 </select>
               </div>
               <div>
@@ -373,7 +378,7 @@ function GastoModal({ gasto, vehiculos, choferes, proveedores, tiposGasto, onClo
             </div>
             <div>
               <label className={labelCls}>Tipo de mantenimiento</label>
-              <select value={form.tipo_mtto} onChange={(e) => setForm({ ...form, tipo_mtto: e.target.value })} className={inputCls}>
+              <select value={form.tipo_mtto} onChange={(e) => setForm({ ...form, tipo_mtto: e.target.value as any })} className={inputCls}>
                 <option value="N/A">N/A</option>
                 <option value="Planificado">Planificado</option>
                 <option value="Imprevisto">Imprevisto</option>
