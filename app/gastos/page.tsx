@@ -36,9 +36,9 @@ const APLICA_A: Record<string, { label: string; classes: string }> = {
   oficina: { label: "Oficina", classes: "bg-gray-100 text-gray-700" },
 };
 
-function fmtGs(n: number) { return "Gs. " + (n || 0).toLocaleString("es-PY"); }
+function fmtGs(n: number) { return "Gs. " + Math.round(n || 0).toLocaleString("es-PY"); }
 function fmtGsShort(n: number) {
-  return "Gs. " + (n || 0).toLocaleString("es-PY");
+ return "Gs. " + Math.round(n || 0).toLocaleString("es-PY");
 }
 
 export default function GastosPage() {
