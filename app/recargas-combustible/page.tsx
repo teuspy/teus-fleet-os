@@ -29,7 +29,7 @@ function fmtFecha(fechaStr: string) {
 }
 
 function fmtGs(n: number) {
-  return "₲ " + (n || 0).toLocaleString("es-PY");
+return "₲ " + Math.round(n || 0).toLocaleString("es-PY");
 }
 
 export default function RecargasCombustiblePage() {
