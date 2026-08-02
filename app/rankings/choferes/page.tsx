@@ -8,6 +8,7 @@ type Chofer = { id: string; nombre_completo: string; vehiculo_asignado_id: strin
 type Vehiculo = { id: string; alias: string | null; chapa: string; tipo: string };
 type Viaje = { chofer_id: string | null; vehiculo_id: string | null; precio_flete: number; costo_combustible: number; viatico: number; otros_costos: number; utilidad_bruta: number };
 type GastoJoin = { monto: number; vehiculo?: { alias: string | null } | null };
+type GastoFijo = { monto_mensual: number };
 
 type RankingChofer = {
   choferId: string;
@@ -18,6 +19,7 @@ type RankingChofer = {
   facturacion: number;
   gastoOperativo: number;
   gastoFlota: number;
+  gastoFijo: number;
   utilBruta: number;
   utilNeta: number;
   utilPorViaje: number;
@@ -55,16 +57,16 @@ export default function RankingChoferesPage() {
       supabase.from("vehiculos").select("id, alias, chapa, tipo").eq("activo", true),
       supabase.from("viajes").select("chofer_id, vehiculo_id, precio_flete, costo_combustible, viatico, otros_costos, utilidad_bruta").gte("fecha", startDate).lte("fecha", endDate),
       supabase.from("gastos").select("monto, vehiculo:vehiculo_id(alias)").gte("fecha", startDate).lte("fecha", endDate),
-      supabase.from("gastos_fijos").select("monto"),
+      supabase.from("gastos_fijos").select("monto_mensual").eq("aplica_a", "equipos").eq("activo", true),
     ]);
 
     const choferes = (chofRes.data as Chofer[]) || [];
     const vehiculos = (vehsRes.data as Vehiculo[]) || [];
     const viajes = (viajesRes.data as Viaje[]) || [];
     const gastos = (gastosRes.data as unknown as GastoJoin[]) || [];
-    const gastosFijos = (gfRes.data as { monto: number }[]) || [];
+    const gastosFijos = (gfRes.data as GastoFijo[]) || [];
 
-    const totalFijos = gastosFijos.reduce((s, g) => s + (g.monto || 0), 0);
+    const totalFijos = gastosFijos.reduce((s, g) => s + (g.monto_mensual || 0), 0);
     setGastosFijosTotal(totalFijos);
 
     const tractos = vehiculos.filter(v => v.tipo === "tracto");
@@ -87,7 +89,8 @@ export default function RankingChoferesPage() {
         equipo: tracto?.alias || "Sin asignar",
         chapa: tracto?.chapa || "-",
         viajes: viajesChofer.length,
-        facturacion, gastoOperativo, gastoFlota, utilBruta, utilNeta, utilPorViaje,
+        facturacion, gastoOperativo, gastoFlota, gastoFijo: tracto ? fijoPorEquipo : 0,
+        utilBruta, utilNeta, utilPorViaje,
         posicion: 0, vsLider: 0,
       };
     }).filter(r => r.viajes > 0 || r.equipo !== "Sin asignar");
@@ -118,7 +121,7 @@ export default function RankingChoferesPage() {
             <Medal className="w-8 h-8 text-yellow-500" />
             Ranking de Choferes
           </h1>
-          <p className="text-sm text-teus-text_muted mt-1">Performance mensual por chofer · Barras comparativas de utilidad neta</p>
+          <p className="text-sm text-teus-text_muted mt-1">Performance mensual por chofer · Utilidad NETA con gastos fijos prorrateados</p>
         </div>
         <div className="flex items-center gap-3 bg-teus-card_light border border-teus-border_light rounded-xl px-4 py-2 shadow-card">
           <Calendar className="w-4 h-4 text-teus-accent" />
@@ -150,19 +153,25 @@ export default function RankingChoferesPage() {
             </div>
             <div className="bg-teus-accent/10 border border-teus-accent/30 rounded-xl p-4">
               <div className="flex items-center gap-2 text-xs font-bold uppercase text-teus-accent-dark"><TrendingUp className="w-4 h-4" />Facturación total</div>
-              <div className="text-3xl font-black mt-1 text-teus-accent-dark">{fmtGsShort(totales.totalFact)}</div>
+              <div className="text-2xl font-black mt-1 text-teus-accent-dark">{fmtGsShort(totales.totalFact)}</div>
+              <div className="text-[10px] text-teus-accent-dark opacity-70">{fmtGs(totales.totalFact)}</div>
             </div>
             <div className={`border rounded-xl p-4 ${totales.totalUtil >= 0 ? "bg-green-50 border-green-200" : "bg-red-50 border-red-200"}`}>
               <div className={`flex items-center gap-2 text-xs font-bold uppercase ${totales.totalUtil >= 0 ? "text-green-700" : "text-red-700"}`}><Trophy className="w-4 h-4" />Utilidad neta acumulada</div>
-              <div className={`text-3xl font-black mt-1 ${totales.totalUtil >= 0 ? "text-green-900" : "text-red-900"}`}>{fmtGsShort(totales.totalUtil)}</div>
+              <div className={`text-2xl font-black mt-1 ${totales.totalUtil >= 0 ? "text-green-900" : "text-red-900"}`}>{fmtGsShort(totales.totalUtil)}</div>
+              <div className="text-[10px] opacity-70">{fmtGs(totales.totalUtil)}</div>
             </div>
           </div>
 
-          {/* Barras comparativas */}
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 mb-6 text-xs text-blue-800">
+            💡 Fijo prorrateado por equipo: <strong>{fmtGs(gastosFijosTotal / (Math.max(rankings.filter(r => r.equipo !== "Sin asignar").length, 1)))}</strong>/mes.
+            {gastosFijosTotal === 0 && <span className="ml-2 text-blue-600">(Sin gastos fijos "equipos" activos)</span>}
+          </div>
+
           <div className="bg-teus-card_light border border-teus-border_light rounded-xl p-6 mb-6 shadow-card">
             <div className="text-sm font-bold text-teus-text_dark mb-4 flex items-center gap-2">
               <Trophy className="w-5 h-5 text-yellow-500" />
-              Comparativa visual — Utilidad neta por chofer
+              Comparativa visual — Utilidad NETA por chofer
             </div>
             <div className="space-y-3">
               {rankings.map(r => {
@@ -179,7 +188,7 @@ export default function RankingChoferesPage() {
                     <div className="flex-1 h-8 bg-gray-100 rounded-lg overflow-hidden relative">
                       <div className={`h-full ${isNegative ? "bg-gradient-to-r from-red-500 to-red-600" : "bg-gradient-to-r from-teus-accent to-green-500"} transition-all shadow-inner`} style={{ width: `${pctBar}%` }}>
                         <div className="h-full flex items-center justify-end pr-2">
-                          <span className="text-xs font-black text-white drop-shadow">{fmtGsShort(r.utilNeta)}</span>
+                          <span className="text-xs font-black text-white drop-shadow whitespace-nowrap">{fmtGs(r.utilNeta)}</span>
                         </div>
                       </div>
                     </div>
@@ -189,46 +198,53 @@ export default function RankingChoferesPage() {
             </div>
           </div>
 
-          {/* Tabla completa */}
           <div className="bg-teus-card_light border border-teus-border_light rounded-xl overflow-hidden shadow-card">
             <div className="px-5 py-3 bg-teus-bg_soft border-b border-teus-border_light">
               <div className="text-sm font-bold text-teus-text_dark">🏁 Ranking completo — {MESES[month - 1]} {year}</div>
             </div>
-            <table className="w-full text-sm">
-              <thead className="bg-teus-bg_soft text-xs uppercase text-teus-text_muted">
-                <tr>
-                  <th className="text-center px-3 py-3">#</th>
-                  <th className="text-left px-3 py-3">Chofer</th>
-                  <th className="text-left px-3 py-3">Equipo</th>
-                  <th className="text-right px-3 py-3">Viajes</th>
-                  <th className="text-right px-3 py-3">Facturación</th>
-                  <th className="text-right px-3 py-3">Util. bruta</th>
-                  <th className="text-right px-3 py-3">Util. NETA</th>
-                  <th className="text-right px-3 py-3">Util/viaje</th>
-                  <th className="text-right px-3 py-3">VS Líder</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rankings.map(r => (
-                  <tr key={r.choferId} className="border-t border-teus-border_light hover:bg-teus-bg_soft/50">
-                    <td className="text-center px-3 py-3 font-black text-lg">{r.posicion}</td>
-                    <td className="px-3 py-3">
-                      <div className="font-bold text-teus-text_dark">{r.nombre}</div>
-                    </td>
-                    <td className="px-3 py-3">
-                      <div className="text-sm font-semibold">{r.equipo}</div>
-                      <div className="text-[10px] text-teus-text_soft font-mono">{r.chapa}</div>
-                    </td>
-                    <td className="px-3 py-3 text-right font-mono">{r.viajes}</td>
-                    <td className="px-3 py-3 text-right font-mono">{fmtGsShort(r.facturacion)}</td>
-                    <td className={`px-3 py-3 text-right font-mono font-bold ${r.utilBruta >= 0 ? "text-teus-text_dark" : "text-red-600"}`}>{fmtGsShort(r.utilBruta)}</td>
-                    <td className={`px-3 py-3 text-right font-mono font-black ${r.utilNeta >= 0 ? "text-teus-accent" : "text-red-600"}`}>{fmtGsShort(r.utilNeta)}</td>
-                    <td className="px-3 py-3 text-right font-mono text-xs">{fmtGsShort(r.utilPorViaje)}</td>
-                    <td className={`px-3 py-3 text-right font-mono text-xs ${r.vsLider === 0 ? "text-teus-accent font-bold" : "text-teus-text_muted"}`}>{r.vsLider === 0 ? "LÍDER" : fmtGsShort(r.vsLider)}</td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-teus-bg_soft text-xs uppercase text-teus-text_muted">
+                  <tr>
+                    <th className="text-center px-3 py-3">#</th>
+                    <th className="text-left px-3 py-3">Chofer</th>
+                    <th className="text-left px-3 py-3">Equipo</th>
+                    <th className="text-right px-3 py-3">Viajes</th>
+                    <th className="text-right px-3 py-3">Facturación</th>
+                    <th className="text-right px-3 py-3">Gasto op.</th>
+                    <th className="text-right px-3 py-3">Gasto flota</th>
+                    <th className="text-right px-3 py-3">Fijo prorr.</th>
+                    <th className="text-right px-3 py-3">Util. bruta</th>
+                    <th className="text-right px-3 py-3">Util. NETA</th>
+                    <th className="text-right px-3 py-3">Util/viaje</th>
+                    <th className="text-right px-3 py-3">VS Líder</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {rankings.map(r => (
+                    <tr key={r.choferId} className="border-t border-teus-border_light hover:bg-teus-bg_soft/50">
+                      <td className="text-center px-3 py-3 font-black text-lg">{r.posicion}</td>
+                      <td className="px-3 py-3">
+                        <div className="font-bold text-teus-text_dark">{r.nombre}</div>
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="text-sm font-semibold">{r.equipo}</div>
+                        <div className="text-[10px] text-teus-text_soft font-mono">{r.chapa}</div>
+                      </td>
+                      <td className="px-3 py-3 text-right font-mono">{r.viajes}</td>
+                      <td className="px-3 py-3 text-right font-mono whitespace-nowrap">{fmtGs(r.facturacion)}</td>
+                      <td className="px-3 py-3 text-right font-mono text-teus-danger whitespace-nowrap">{fmtGs(r.gastoOperativo)}</td>
+                      <td className="px-3 py-3 text-right font-mono text-teus-danger whitespace-nowrap">{fmtGs(r.gastoFlota)}</td>
+                      <td className="px-3 py-3 text-right font-mono text-orange-600 whitespace-nowrap">{fmtGs(r.gastoFijo)}</td>
+                      <td className={`px-3 py-3 text-right font-mono font-bold whitespace-nowrap ${r.utilBruta >= 0 ? "text-teus-text_dark" : "text-red-600"}`}>{fmtGs(r.utilBruta)}</td>
+                      <td className={`px-3 py-3 text-right font-mono font-black whitespace-nowrap ${r.utilNeta >= 0 ? "text-teus-accent" : "text-red-600"}`}>{fmtGs(r.utilNeta)}</td>
+                      <td className="px-3 py-3 text-right font-mono text-xs whitespace-nowrap">{fmtGs(r.utilPorViaje)}</td>
+                      <td className={`px-3 py-3 text-right font-mono text-xs whitespace-nowrap ${r.vsLider === 0 ? "text-teus-accent font-bold" : "text-teus-text_muted"}`}>{r.vsLider === 0 ? "LÍDER" : fmtGs(r.vsLider)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </>
       )}
