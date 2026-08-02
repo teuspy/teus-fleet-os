@@ -388,7 +388,11 @@ function ViajeModal({
   }
 
   const costoCombustible = form.litros * form.gs_por_litro;
-  const utilidadBruta = form.precio_flete - costoCombustible - form.viatico - form.otros_costos;
+  const utilidadBruta = form.vehiculo_externo_id === "TL"
+    ? (form.comision_recibida || 0)
+    : form.vehiculo_externo_id
+      ? (form.precio_flete || 0) - (form.precio_pagado_al_externo || 0)
+      : (form.precio_flete || 0) - costoCombustible - (form.viatico || 0) - (form.otros_costos || 0);
   const margenPct = form.precio_flete > 0 ? (utilidadBruta / form.precio_flete) * 100 : 0;
 
   async function handleSubmit(e: React.FormEvent) {
