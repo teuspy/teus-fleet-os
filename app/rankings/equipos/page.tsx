@@ -8,7 +8,7 @@ type Vehiculo = { id: string; alias: string | null; chapa: string; tipo: string 
 type Chofer = { id: string; nombre_completo: string; vehiculo_asignado_id: string | null };
 type Viaje = { vehiculo_id: string | null; chofer_id: string | null; precio_flete: number; costo_combustible: number; viatico: number; otros_costos: number; utilidad_bruta: number };
 type GastoJoin = { monto: number; vehiculo_id: string | null; aplica_a: string | null; vehiculo?: { alias: string | null } | null };
-type GastoFijo = { monto: number };
+type GastoFijo = { monto_mensual: number };
 
 type Ranking = {
   alias: string;
@@ -57,7 +57,7 @@ export default function RankingEquiposPage() {
       supabase.from("choferes").select("id, nombre_completo, vehiculo_asignado_id").eq("activo", true),
       supabase.from("viajes").select("vehiculo_id, chofer_id, precio_flete, costo_combustible, viatico, otros_costos, utilidad_bruta").gte("fecha", startDate).lte("fecha", endDate),
       supabase.from("gastos").select("monto, vehiculo_id, aplica_a, vehiculo:vehiculo_id(alias)").gte("fecha", startDate).lte("fecha", endDate),
-      supabase.from("gastos_fijos").select("monto"),
+      supabase.from("gastos_fijos").select("monto_mensual").eq("aplica_a", "equipos").eq("activo", true),
     ]);
 
     const vehiculos = (vehsRes.data as Vehiculo[]) || [];
@@ -66,7 +66,7 @@ export default function RankingEquiposPage() {
     const gastos = (gastosRes.data as unknown as GastoJoin[]) || [];
     const gastosFijos = (gfRes.data as GastoFijo[]) || [];
 
-    const totalFijos = gastosFijos.reduce((s, g) => s + (g.monto || 0), 0);
+    const totalFijos = gastosFijos.reduce((s, g) => s + (g.monto_mensual || 0), 0);
     setGastosFijosTotal(totalFijos);
 
     const tractos = vehiculos.filter(v => v.tipo === "tracto");
@@ -151,33 +151,28 @@ export default function RankingEquiposPage() {
         <div className="p-16 text-center text-teus-text_muted bg-teus-card_light border border-teus-border_light rounded-xl">
           <Trophy className="w-12 h-12 text-teus-text_soft mx-auto mb-3" />
           <div className="text-lg font-bold">No hay equipos con alias asignado</div>
-          <div className="text-sm mt-2">Asigná un alias a cada vehículo activo para que aparezca en el ranking.</div>
         </div>
       ) : (
         <>
-          {/* KPIs generales */}
           <div className="grid grid-cols-5 gap-3 mb-6">
-            <KpiCard icon={<Truck className="w-4 h-4" />} label="Viajes mes" value={totales.viajes.toString()} color="blue" />
-            <KpiCard icon={<DollarSign className="w-4 h-4" />} label="Facturación" value={fmtGsShort(totales.facturacion)} color="accent" />
-            <KpiCard icon={<TrendingDown className="w-4 h-4" />} label="Gastos totales" value={fmtGsShort(totales.gastoTotal + gastosFijosTotal)} color="red" />
-            <KpiCard icon={<TrendingUp className="w-4 h-4" />} label="Util. bruta" value={fmtGsShort(totales.utilBruta)} color={totales.utilBruta >= 0 ? "green" : "red"} />
-            <KpiCard icon={<TrendingUp className="w-4 h-4" />} label="Util. neta" value={fmtGsShort(totales.utilNeta)} color={totales.utilNeta >= 0 ? "green" : "red"} />
+            <KpiCard icon={<Truck className="w-4 h-4" />} label="Viajes mes" value={totales.viajes.toString()} sub="" color="blue" />
+            <KpiCard icon={<DollarSign className="w-4 h-4" />} label="Facturación" value={fmtGsShort(totales.facturacion)} sub={fmtGs(totales.facturacion)} color="accent" />
+            <KpiCard icon={<TrendingDown className="w-4 h-4" />} label="Gastos totales" value={fmtGsShort(totales.gastoTotal + gastosFijosTotal)} sub={fmtGs(totales.gastoTotal + gastosFijosTotal)} color="red" />
+            <KpiCard icon={<TrendingUp className="w-4 h-4" />} label="Util. bruta" value={fmtGsShort(totales.utilBruta)} sub={fmtGs(totales.utilBruta)} color={totales.utilBruta >= 0 ? "green" : "red"} />
+            <KpiCard icon={<TrendingUp className="w-4 h-4" />} label="Util. neta" value={fmtGsShort(totales.utilNeta)} sub={fmtGs(totales.utilNeta)} color={totales.utilNeta >= 0 ? "green" : "red"} />
           </div>
 
-          {/* Podio TOP 3 */}
           {rankings.length >= 3 && <Podio top3={rankings.slice(0, 3)} />}
 
-          {/* Info prorrateo */}
           <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6 text-sm">
             <div className="font-bold text-blue-900 mb-1">💡 Cálculo de utilidad neta</div>
             <div className="text-blue-800 text-xs">
-              Gastos fijos totales del mes: <strong>{fmtGs(gastosFijosTotal)}</strong> ·
+              Gastos fijos EQUIPOS del mes: <strong>{fmtGs(gastosFijosTotal)}</strong> ·
               Prorrateo entre {rankings.length} equipos: <strong>{fmtGs(gastosFijosTotal / (rankings.length || 1))}</strong> por equipo
-              {gastosFijosTotal === 0 && <span className="ml-2 text-blue-600">(Aún no cargaste gastos fijos — cuando lo hagas, la utilidad neta se recalcula sola)</span>}
+              {gastosFijosTotal === 0 && <span className="ml-2 text-blue-600">(No hay gastos fijos activos con "Aplica a: Equipos")</span>}
             </div>
           </div>
 
-          {/* Tabla completa */}
           <div className="bg-teus-card_light border border-teus-border_light rounded-xl overflow-hidden shadow-card">
             <div className="px-5 py-3 bg-teus-bg_soft border-b border-teus-border_light flex items-center justify-between">
               <div className="text-sm font-bold text-teus-text_dark">🏆 Ranking completo — {MESES[month - 1]} {year}</div>
@@ -203,7 +198,7 @@ export default function RankingEquiposPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {rankings.map((r) => <RankingRow key={r.alias} r={r} lider={rankings[0]?.utilNeta || 0} />)}
+                  {rankings.map((r) => <RankingRow key={r.alias} r={r} />)}
                 </tbody>
               </table>
             </div>
@@ -214,7 +209,7 @@ export default function RankingEquiposPage() {
   );
 }
 
-function KpiCard({ icon, label, value, color }: { icon: React.ReactNode; label: string; value: string; color: string }) {
+function KpiCard({ icon, label, value, sub, color }: { icon: React.ReactNode; label: string; value: string; sub: string; color: string }) {
   const colors: Record<string, string> = {
     blue: "bg-blue-50 border-blue-200 text-blue-700",
     accent: "bg-teus-accent/10 border-teus-accent/30 text-teus-accent-dark",
@@ -228,6 +223,7 @@ function KpiCard({ icon, label, value, color }: { icon: React.ReactNode; label: 
         {label}
       </div>
       <div className="text-xl font-black mt-1">{value}</div>
+      {sub && <div className="text-[10px] opacity-70 mt-0.5">{sub}</div>}
     </div>
   );
 }
@@ -240,11 +236,8 @@ function Podio({ top3 }: { top3: Ranking[] }) {
     <div className="bg-gradient-to-b from-yellow-50 via-white to-orange-50 border border-teus-border_light rounded-2xl p-6 mb-6 shadow-card">
       <div className="text-center text-sm font-bold text-teus-text_muted uppercase tracking-widest mb-4">🏆 Podio del mes</div>
       <div className="grid grid-cols-3 gap-4 items-end">
-        {/* 2do puesto (izquierda) */}
         <PodioCard rank={2} data={second} color="silver" height="h-40" />
-        {/* 1er puesto (centro, más alto) */}
         <PodioCard rank={1} data={first} color="gold" height="h-52" />
-        {/* 3er puesto (derecha) */}
         <PodioCard rank={3} data={third} color="bronze" height="h-32" />
       </div>
     </div>
@@ -262,7 +255,7 @@ function PodioCard({ rank, data, color, height }: { rank: number; data: Ranking;
       <div className="text-4xl mb-2">{styles.icon}</div>
       <div className={`text-3xl font-black ${styles.text === "text-yellow-950" ? "text-yellow-700" : styles.text === "text-orange-950" ? "text-orange-700" : "text-gray-700"}`}>{data.alias}</div>
       <div className="text-xs text-teus-text_muted mt-1">{data.chofer}</div>
-      <div className="text-sm font-bold text-teus-accent mt-1">{fmtGsShort(data.utilNeta)}</div>
+      <div className="text-sm font-bold text-teus-accent mt-1">{fmtGs(data.utilNeta)}</div>
       <div className={`w-full ${height} ${styles.bg} ${styles.border} border-2 rounded-t-lg mt-3 flex items-center justify-center shadow-lg`}>
         <div className={`text-4xl font-black ${styles.text}`}>{styles.label}</div>
       </div>
@@ -270,8 +263,7 @@ function PodioCard({ rank, data, color, height }: { rank: number; data: Ranking;
   );
 }
 
-function RankingRow({ r, lider }: { r: Ranking; lider: number }) {
-  const pct = lider !== 0 ? (r.utilNeta / lider) * 100 : 0;
+function RankingRow({ r }: { r: Ranking }) {
   const badge = r.posicion === 1 ? "🥇" : r.posicion === 2 ? "🥈" : r.posicion === 3 ? "🥉" : r.utilNeta < 0 ? "⚠️" : `${r.posicion}°`;
   return (
     <tr className="border-t border-teus-border_light hover:bg-teus-bg_soft/50">
@@ -282,14 +274,14 @@ function RankingRow({ r, lider }: { r: Ranking; lider: number }) {
       </td>
       <td className="px-3 py-3 text-xs text-teus-text_muted">{r.chofer}</td>
       <td className="px-3 py-3 text-right font-mono">{r.viajes}</td>
-      <td className="px-3 py-3 text-right font-mono font-semibold">{fmtGsShort(r.facturacion)}</td>
-      <td className="px-3 py-3 text-right font-mono text-teus-danger">{fmtGsShort(r.gastoOperativo)}</td>
-      <td className="px-3 py-3 text-right font-mono text-teus-danger">{fmtGsShort(r.gastoFlota)}</td>
-      <td className="px-3 py-3 text-right font-mono text-orange-600">{fmtGsShort(r.gastoFijo)}</td>
-      <td className={`px-3 py-3 text-right font-mono font-bold ${r.utilBruta >= 0 ? "text-teus-text_dark" : "text-teus-danger"}`}>{fmtGsShort(r.utilBruta)}</td>
-      <td className={`px-3 py-3 text-right font-mono font-black text-base ${r.utilNeta >= 0 ? "text-teus-accent" : "text-red-600"}`}>{fmtGsShort(r.utilNeta)}</td>
-      <td className="px-3 py-3 text-right font-mono text-xs">{fmtGsShort(r.utilPorViaje)}</td>
-      <td className={`px-3 py-3 text-right font-mono text-xs ${r.vsLider === 0 ? "text-teus-accent font-bold" : "text-teus-text_muted"}`}>{r.vsLider === 0 ? "LÍDER" : fmtGsShort(r.vsLider)}</td>
+      <td className="px-3 py-3 text-right font-mono font-semibold whitespace-nowrap">{fmtGs(r.facturacion)}</td>
+      <td className="px-3 py-3 text-right font-mono text-teus-danger whitespace-nowrap">{fmtGs(r.gastoOperativo)}</td>
+      <td className="px-3 py-3 text-right font-mono text-teus-danger whitespace-nowrap">{fmtGs(r.gastoFlota)}</td>
+      <td className="px-3 py-3 text-right font-mono text-orange-600 whitespace-nowrap">{fmtGs(r.gastoFijo)}</td>
+      <td className={`px-3 py-3 text-right font-mono font-bold whitespace-nowrap ${r.utilBruta >= 0 ? "text-teus-text_dark" : "text-teus-danger"}`}>{fmtGs(r.utilBruta)}</td>
+      <td className={`px-3 py-3 text-right font-mono font-black text-base whitespace-nowrap ${r.utilNeta >= 0 ? "text-teus-accent" : "text-red-600"}`}>{fmtGs(r.utilNeta)}</td>
+      <td className="px-3 py-3 text-right font-mono text-xs whitespace-nowrap">{fmtGs(r.utilPorViaje)}</td>
+      <td className={`px-3 py-3 text-right font-mono text-xs whitespace-nowrap ${r.vsLider === 0 ? "text-teus-accent font-bold" : "text-teus-text_muted"}`}>{r.vsLider === 0 ? "LÍDER" : fmtGs(r.vsLider)}</td>
       <td className="px-3 py-3 text-center text-lg">{badge}</td>
     </tr>
   );
