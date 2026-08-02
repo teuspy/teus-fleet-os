@@ -351,6 +351,10 @@ function ViajeModal({
     otros_costos: viaje?.otros_costos || 0,
     estado: viaje?.estado || "pendiente",
     observacion: viaje?.observacion || "",
+    vehiculo_externo_id: viaje?.vehiculo_externo_id || "",
+      chofer_externo_nombre: viaje?.chofer_externo_nombre || "",
+      precio_pagado_al_externo: viaje?.precio_pagado_al_externo || 0,
+      comision_recibida: viaje?.comision_recibida || 0,
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -406,6 +410,10 @@ function ViajeModal({
       otros_costos: form.otros_costos || 0,
       estado: form.estado,
       observacion: form.observacion || null,
+      vehiculo_externo_id: form.vehiculo_externo_id && form.vehiculo_externo_id !== "PENDIENTE" ? form.vehiculo_externo_id : null,
+      chofer_externo_nombre: form.chofer_externo_nombre || null,
+      precio_pagado_al_externo: form.precio_pagado_al_externo || 0,
+      comision_recibida: form.comision_recibida || 0,
     };
 
     try {
@@ -584,6 +592,56 @@ function ViajeModal({
             {form.ruta_id && (
               <div className="mt-3 text-xs text-teus-text_muted bg-white/50 rounded-lg px-3 py-2">
                 💡 {idaYVuelta ? "Cuenta km ida + vuelta al contador de mantenimiento" : "Solo cuenta km de ida"}. Podés editar el KM manualmente si tuviste desvío.
+              </div>
+            )}
+          </div>
+          {/* Camión externo (TL, Elvio) */}
+          <div className="bg-orange-50 border border-orange-200 rounded-xl p-4">
+            <label className="flex items-center gap-2 cursor-pointer mb-3">
+              <input type="checkbox" checked={!!form.vehiculo_externo_id}
+                onChange={(e) => {
+                  if (!e.target.checked) {
+                    setForm({ ...form, vehiculo_externo_id: "", chofer_externo_nombre: "", precio_pagado_al_externo: 0, comision_recibida: 0 });
+                  } else {
+                    setForm({ ...form, vehiculo_externo_id: "PENDIENTE" });
+                  }
+                }}
+                className="w-4 h-4" />
+              <span className="text-sm font-bold text-teus-text_dark">🤝 Este viaje usó camión externo (TL, Elvio, etc.)</span>
+            </label>
+            {form.vehiculo_externo_id && (
+              <div className="grid grid-cols-2 gap-3 mt-3">
+                <div>
+                  <label className={labelCls}>Aliado *</label>
+                  <select value={form.vehiculo_externo_id === "PENDIENTE" ? "" : form.vehiculo_externo_id}
+                    onChange={(e) => {
+                      const aliadoId = e.target.value;
+                      const flete = form.precio_flete || 0;
+                      setForm({ ...form, vehiculo_externo_id: aliadoId, comision_recibida: aliadoId === "TL" ? Math.round(flete * 0.05) : 0 });
+                    }} required className={inputCls}>
+                    <option value="">— Elegir —</option>
+                    <option value="TL">TL (David) — Socio 5% comisión</option>
+                    <option value="ELVIO">Elvio González — Compra/venta</option>
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls}>Chofer externo (nombre)</label>
+                  <input type="text" value={form.chofer_externo_nombre || ""}
+                    onChange={(e) => setForm({ ...form, chofer_externo_nombre: e.target.value })}
+                    placeholder="Ej: JORGE / MATIAS / etc." className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Precio pagado al aliado (Gs)</label>
+                  <input type="number" value={form.precio_pagado_al_externo || 0}
+                    onChange={(e) => setForm({ ...form, precio_pagado_al_externo: parseInt(e.target.value) || 0 })}
+                    className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Comisión recibida (auto TL)</label>
+                  <input type="number" value={form.comision_recibida || 0}
+                    onChange={(e) => setForm({ ...form, comision_recibida: parseInt(e.target.value) || 0 })}
+                    className={inputCls} />
+                </div>
               </div>
             )}
           </div>
