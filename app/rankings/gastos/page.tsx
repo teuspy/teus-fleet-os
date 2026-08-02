@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { BarChart3, Loader2, Calendar, TrendingDown, DollarSign } from "lucide-react";
+import { BarChart3, Loader2, Calendar, TrendingDown, DollarSign, X, Users, ArrowRight } from "lucide-react";
 
-type Gasto = { tipo_gasto: string; monto: number };
+type Gasto = { tipo_gasto: string; monto: number; proveedor_id: string | null; concepto: string | null; fecha: string; proveedor?: { nombre: string } | null };
 
 type RankingGasto = {
   tipo: string;
@@ -12,6 +12,14 @@ type RankingGasto = {
   cantidad: number;
   pct: number;
   posicion: number;
+};
+
+type ProveedorEnCategoria = {
+  nombre: string;
+  monto: number;
+  cantidad: number;
+  pct: number;
+  gastos: Gasto[];
 };
 
 const MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
@@ -25,9 +33,6 @@ const COLORS = [
 function fmtGs(n: number) {
   return "Gs. " + Math.round(n || 0).toLocaleString("es-PY");
 }
-function fmtGsShort(n: number) {
-  return "Gs. " + Math.round(n || 0).toLocaleString("es-PY");
-}
 
 export default function RankingGastosPage() {
   const supabase = createClient();
@@ -35,15 +40,20 @@ export default function RankingGastosPage() {
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [rankings, setRankings] = useState<RankingGasto[]>([]);
+  const [allGastos, setAllGastos] = useState<Gasto[]>([]);
   const [loading, setLoading] = useState(true);
+  const [drillCategoria, setDrillCategoria] = useState<string | null>(null);
 
   async function loadData() {
     setLoading(true);
     const startDate = `${year}-${String(month).padStart(2, "0")}-01`;
     const endDate = new Date(year, month, 0).toISOString().split("T")[0];
 
-    const { data } = await supabase.from("gastos").select("tipo_gasto, monto").gte("fecha", startDate).lte("fecha", endDate);
-    const gastos = (data as Gasto[]) || [];
+    const { data } = await supabase.from("gastos")
+      .select("tipo_gasto, monto, proveedor_id, concepto, fecha, proveedor:proveedor_id(nombre)")
+      .gte("fecha", startDate).lte("fecha", endDate);
+    const gastos = (data as unknown as Gasto[]) || [];
+    setAllGastos(gastos);
 
     const totalGeneral = gastos.reduce((s, g) => s + (g.monto || 0), 0);
     const porTipo: Record<string, { monto: number; cantidad: number }> = {};
@@ -83,7 +93,7 @@ export default function RankingGastosPage() {
             <BarChart3 className="w-8 h-8 text-teus-danger" />
             Ranking de Gastos
           </h1>
-          <p className="text-sm text-teus-text_muted mt-1">Dónde se va la plata · Distribución de gastos variables por categoría</p>
+          <p className="text-sm text-teus-text_muted mt-1">Click en cualquier categoría para ver los proveedores que te cobraron 👇</p>
         </div>
         <div className="flex items-center gap-3 bg-teus-card_light border border-teus-border_light rounded-xl px-4 py-2 shadow-card">
           <Calendar className="w-4 h-4 text-teus-accent" />
@@ -129,31 +139,32 @@ export default function RankingGastosPage() {
               <PieChart data={rankings.slice(0, 12)} total={totales.totalGasto} />
             </div>
             <div className="bg-teus-card_light border border-teus-border_light rounded-xl p-6 shadow-card">
-              <div className="text-sm font-bold text-teus-text_dark mb-4">🏆 Top 5 categorías</div>
-              <div className="space-y-3">
+              <div className="text-sm font-bold text-teus-text_dark mb-4">🏆 Top 5 categorías <span className="text-teus-text_soft font-normal text-xs">(click para ver proveedores)</span></div>
+              <div className="space-y-2">
                 {rankings.slice(0, 5).map((r, i) => (
-                  <div key={r.tipo} className="flex items-center gap-3">
+                  <button key={r.tipo} onClick={() => setDrillCategoria(r.tipo)} className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-teus-bg_soft transition text-left group">
                     <div className="w-4 h-4 rounded" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
                     <div className="flex-1 min-w-0">
                       <div className="font-bold text-teus-text_dark truncate capitalize">{r.tipo}</div>
-                      <div className="text-[10px] text-teus-text_soft">{r.cantidad} gastos · {fmtGsShort(r.monto)}</div>
+                      <div className="text-[10px] text-teus-text_soft">{r.cantidad} gastos · {fmtGs(r.monto)}</div>
                     </div>
                     <div className="text-lg font-black text-teus-danger">{r.pct.toFixed(1)}%</div>
-                  </div>
+                    <ArrowRight className="w-4 h-4 text-teus-text_soft group-hover:text-teus-accent transition" />
+                  </button>
                 ))}
               </div>
             </div>
           </div>
 
           <div className="bg-teus-card_light border border-teus-border_light rounded-xl p-6 shadow-card mb-6">
-            <div className="text-sm font-bold text-teus-text_dark mb-4">📊 Barras comparativas — Monto por categoría</div>
+            <div className="text-sm font-bold text-teus-text_dark mb-4">📊 Barras comparativas <span className="text-teus-text_soft font-normal text-xs">(click en una barra para ver proveedores)</span></div>
             <div className="space-y-3">
               {rankings.map((r, i) => {
                 const maxMonto = rankings[0]?.monto || 1;
                 const pctBar = (r.monto / maxMonto) * 100;
                 const badge = r.posicion === 1 ? "🥇" : r.posicion === 2 ? "🥈" : r.posicion === 3 ? "🥉" : `${r.posicion}°`;
                 return (
-                  <div key={r.tipo} className="flex items-center gap-3">
+                  <button key={r.tipo} onClick={() => setDrillCategoria(r.tipo)} className="w-full flex items-center gap-3 hover:bg-teus-bg_soft rounded-lg p-1 transition cursor-pointer text-left">
                     <div className="w-8 text-center text-lg font-black">{badge}</div>
                     <div className="w-48 flex-shrink-0">
                       <div className="text-sm font-bold text-teus-text_dark capitalize truncate">{r.tipo}</div>
@@ -167,7 +178,8 @@ export default function RankingGastosPage() {
                       </div>
                     </div>
                     <div className="w-16 text-right text-sm font-black text-teus-danger">{r.pct.toFixed(1)}%</div>
-                  </div>
+                    <ArrowRight className="w-4 h-4 text-teus-text_soft" />
+                  </button>
                 );
               })}
             </div>
@@ -185,12 +197,13 @@ export default function RankingGastosPage() {
                   <th className="text-right px-3 py-3">Cantidad</th>
                   <th className="text-right px-3 py-3">Monto total</th>
                   <th className="text-right px-3 py-3">% del total</th>
-                  <th className="text-right px-3 py-3">Promedio por gasto</th>
+                  <th className="text-right px-3 py-3">Promedio</th>
+                  <th className="text-center px-3 py-3">Proveedores</th>
                 </tr>
               </thead>
               <tbody>
                 {rankings.map((r, i) => (
-                  <tr key={r.tipo} className="border-t border-teus-border_light hover:bg-teus-bg_soft/50">
+                  <tr key={r.tipo} onClick={() => setDrillCategoria(r.tipo)} className="border-t border-teus-border_light hover:bg-teus-bg_soft/70 cursor-pointer transition">
                     <td className="text-center px-3 py-3 font-black text-lg">{r.posicion}</td>
                     <td className="px-3 py-3">
                       <div className="flex items-center gap-2">
@@ -206,12 +219,25 @@ export default function RankingGastosPage() {
                       </span>
                     </td>
                     <td className="px-3 py-3 text-right font-mono text-xs text-teus-text_muted whitespace-nowrap">{fmtGs(r.monto / r.cantidad)}</td>
+                    <td className="px-3 py-3 text-center">
+                      <button className="inline-flex items-center gap-1 text-teus-accent hover:text-teus-accent-dark font-bold text-xs">
+                        Ver <ArrowRight className="w-3 h-3" />
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         </>
+      )}
+
+      {drillCategoria && (
+        <DrillDownModal
+          categoria={drillCategoria}
+          gastos={allGastos.filter(g => g.tipo_gasto === drillCategoria)}
+          onClose={() => setDrillCategoria(null)}
+        />
       )}
     </div>
   );
@@ -242,16 +268,96 @@ function PieChart({ data, total }: { data: RankingGasto[]; total: number }) {
     <div className="flex items-center justify-center">
       <svg width={size} height={size}>
         {segments.map((seg, i) => (
-          <path
-            key={i}
-            d={seg.path}
-            fill={seg.color}
-            stroke="#fff"
-            strokeWidth="2"
-            style={{ transition: "all 0.3s ease" }}
-          />
+          <path key={i} d={seg.path} fill={seg.color} stroke="#fff" strokeWidth="2" style={{ transition: "all 0.3s ease" }} />
         ))}
       </svg>
+    </div>
+  );
+}
+
+function DrillDownModal({ categoria, gastos, onClose }: { categoria: string; gastos: Gasto[]; onClose: () => void }) {
+  const totalCategoria = gastos.reduce((s, g) => s + (g.monto || 0), 0);
+
+  const porProveedor: Record<string, ProveedorEnCategoria> = {};
+  gastos.forEach(g => {
+    const nombre = g.proveedor?.nombre || "Sin proveedor";
+    if (!porProveedor[nombre]) porProveedor[nombre] = { nombre, monto: 0, cantidad: 0, pct: 0, gastos: [] };
+    porProveedor[nombre].monto += g.monto || 0;
+    porProveedor[nombre].cantidad++;
+    porProveedor[nombre].gastos.push(g);
+  });
+
+  const proveedores = Object.values(porProveedor).map(p => ({
+    ...p,
+    pct: totalCategoria > 0 ? (p.monto / totalCategoria) * 100 : 0,
+  })).sort((a, b) => b.monto - a.monto);
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 animate-fade-in">
+      <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-6 py-4 border-b sticky top-0 bg-white z-10">
+          <div>
+            <h2 className="text-xl font-black flex items-center gap-2">
+              <Users className="w-6 h-6 text-teus-accent" />
+              Proveedores de <span className="capitalize text-teus-danger">{categoria}</span>
+            </h2>
+            <div className="text-xs text-teus-text_muted mt-1">Total categoría: <strong>{fmtGs(totalCategoria)}</strong> · {gastos.length} gastos · {proveedores.length} proveedores distintos</div>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded"><X className="w-5 h-5" /></button>
+        </div>
+
+        <div className="p-6">
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 mb-5 text-sm text-blue-900">
+            💡 <strong>Consejo de negociación:</strong> El proveedor #1 tiene el 
+            <strong className="mx-1">{proveedores[0]?.pct.toFixed(1)}%</strong> 
+            de tu gasto en {categoria}. Es tu mejor candidato para pedir descuento por volumen.
+          </div>
+
+          <div className="space-y-3 mb-6">
+            {proveedores.map((p, i) => {
+              const maxMonto = proveedores[0]?.monto || 1;
+              const pctBar = (p.monto / maxMonto) * 100;
+              const badge = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `${i + 1}°`;
+              return (
+                <div key={p.nombre} className="border border-teus-border_light rounded-xl p-4 hover:border-teus-accent transition">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="text-2xl">{badge}</div>
+                    <div className="flex-1">
+                      <div className="font-black text-lg text-teus-text_dark">{p.nombre}</div>
+                      <div className="text-xs text-teus-text_muted">{p.cantidad} gastos · promedio {fmtGs(p.monto / p.cantidad)}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-2xl font-black text-teus-danger">{fmtGs(p.monto)}</div>
+                      <div className="text-xs font-bold text-teus-accent">{p.pct.toFixed(1)}% del gasto</div>
+                    </div>
+                  </div>
+                  <div className="w-full h-3 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-gradient-to-r from-red-500 to-orange-500 transition-all" style={{ width: `${pctBar}%` }} />
+                  </div>
+                  <details className="mt-3">
+                    <summary className="text-xs text-teus-text_muted cursor-pointer hover:text-teus-accent font-semibold">Ver detalle de los {p.cantidad} gastos</summary>
+                    <div className="mt-2 space-y-1">
+                      {p.gastos.sort((a, b) => (b.monto || 0) - (a.monto || 0)).map((g, gi) => (
+                        <div key={gi} className="flex justify-between text-xs bg-teus-bg_soft rounded px-2 py-1">
+                          <div>
+                            <span className="font-mono text-teus-text_soft">{g.fecha}</span>
+                            <span className="ml-2">{g.concepto || "—"}</span>
+                          </div>
+                          <span className="font-bold text-teus-danger">{fmtGs(g.monto)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="flex justify-end">
+            <button onClick={onClose} className="px-4 py-2 bg-teus-accent hover:bg-teus-accent-2 text-white font-bold rounded-lg text-sm">Cerrar</button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
