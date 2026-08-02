@@ -35,6 +35,10 @@ type Viaje = {
   utilidad_bruta: number;
   estado: "pendiente" | "facturado" | "cobrado" | "cancelado";
   observacion: string | null;
+  vehiculo_externo_id: string | null;
+  chofer_externo_nombre: string | null;
+  precio_pagado_al_externo: number;
+  comision_recibida: number;
   vehiculo?: Vehiculo | null;
   chofer?: Chofer | null;
   cliente?: Cliente | null;
