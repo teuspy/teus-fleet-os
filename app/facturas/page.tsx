@@ -30,9 +30,9 @@ const ESTADOS: Record<string, { label: string; classes: string }> = {
   anulada: { label: "Anulada", classes: "bg-gray-100 text-gray-500 line-through" },
 };
 
-function fmtGs(n: number) { return "Gs. " + (n || 0).toLocaleString("es-PY"); }
+function fmtGs(n: number) { return "Gs. " + Math.round(n || 0).toLocaleString("es-PY"); }
 function fmtGsShort(n: number) {
-  return "Gs. " + (n || 0).toLocaleString("es-PY");
+ return "Gs. " + Math.round(n || 0).toLocaleString("es-PY");
 }
 
 function calcDiasVenc(fechaVenc: string | null): number | null {
