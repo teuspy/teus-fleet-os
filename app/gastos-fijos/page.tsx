@@ -26,12 +26,12 @@ const CATEGORIAS: Record<string, { label: string; icon: any; color: string }> = 
   administrativos: { label: "Administrativos",        icon: Briefcase,  color: "bg-gray-50 border-gray-200 text-gray-700" },
 };
 
-function fmtGs(n: number) { return "Gs. " + (n || 0).toLocaleString("es-PY"); }
+function fmtGs(n: number) { return "Gs. " + Math.round(n || 0).toLocaleString("es-PY"); }
 function fmtGsShort(n: number) {
   if (!n) return "Gs. 0";
   if (n >= 1_000_000) return "Gs. " + (n / 1_000_000).toFixed(1).replace(".0","") + "M";
   if (n >= 1_000) return "Gs. " + (n / 1_000).toFixed(0) + "K";
-  return "Gs. " + n.toLocaleString("es-PY");
+ return "Gs. " + Math.round(n).toLocaleString("es-PY");
 }
 
 export default function GastosFijosPage() {
