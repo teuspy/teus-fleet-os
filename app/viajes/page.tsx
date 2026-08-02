@@ -415,7 +415,11 @@ function ViajeModal({
       gs_por_litro: form.gs_por_litro || 0,
       viatico: form.viatico || 0,
       precio_flete: form.precio_flete || 0,
-      otros_costos: form.otros_costos || 0,
+     otros_costos: form.vehiculo_externo_id === "TL"
+        ? (form.precio_flete || 0) - (form.comision_recibida || 0)
+        : form.vehiculo_externo_id
+          ? (form.precio_pagado_al_externo || 0)
+          : (form.otros_costos || 0),
       estado: form.estado,
       observacion: form.observacion || null,
       vehiculo_externo_id: form.vehiculo_externo_id && form.vehiculo_externo_id !== "PENDIENTE" ? form.vehiculo_externo_id : null,
