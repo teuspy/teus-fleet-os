@@ -43,10 +43,10 @@ type Viaje = {
 const MESES_ES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 
 function fmtGs(n: number) {
-  return "Gs. " + (n || 0).toLocaleString("es-PY");
+ return "Gs. " + Math.round(n || 0).toLocaleString("es-PY");
 }
 function fmtGsShort(n: number) {
-  return "Gs. " + (n || 0).toLocaleString("es-PY");
+ return "Gs. " + Math.round(n || 0).toLocaleString("es-PY");
 }
 
 const ESTADOS: Record<string, { label: string; classes: string }> = {
