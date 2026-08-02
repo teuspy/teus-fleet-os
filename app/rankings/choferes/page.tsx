@@ -36,7 +36,7 @@ function fmtGsShort(n: number) {
   if (abs >= 1_000) return sign + "Gs. " + (abs / 1_000).toFixed(0) + "K";
   return sign + "Gs. " + abs.toLocaleString("es-PY");
 }
-function fmtGs(n: number) { const sign = n < 0 ? "-" : ""; return sign + "Gs. " + Math.abs(n).toLocaleString("es-PY"); }
+function fmtGs(n: number) { const sign = n < 0 ? "-" : ""; return sign + "Gs. " + Math.round(Math.abs(n)).toLocaleString("es-PY"); }
 
 export default function RankingChoferesPage() {
   const supabase = createClient();
