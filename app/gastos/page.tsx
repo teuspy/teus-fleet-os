@@ -38,10 +38,7 @@ const APLICA_A: Record<string, { label: string; classes: string }> = {
 
 function fmtGs(n: number) { return "Gs. " + (n || 0).toLocaleString("es-PY"); }
 function fmtGsShort(n: number) {
-  if (!n) return "Gs. 0";
-  if (n >= 1_000_000) return "Gs. " + (n / 1_000_000).toFixed(1).replace(".0","") + "M";
-  if (n >= 1_000) return "Gs. " + (n / 1_000).toFixed(0) + "K";
-  return "Gs. " + n.toLocaleString("es-PY");
+  return "Gs. " + (n || 0).toLocaleString("es-PY");
 }
 
 export default function GastosPage() {
