@@ -482,14 +482,14 @@ function ViajeModal({
           <div className="grid grid-cols-3 gap-4">
             <div>
               <label className={labelCls}>Equipo (tracto) *</label>
-              <select value={form.vehiculo_id} onChange={(e) => onVehiculoChange(e.target.value)} required className={inputCls}>
+              <select value={form.vehiculo_id} onChange={(e) => onVehiculoChange(e.target.value)} required={!form.vehiculo_externo_id} className={inputCls}>
                 <option value="">— Elegir —</option>
                 {vehiculos.map(v => <option key={v.id} value={v.id}>{v.nombre_equipo} · {v.chapa}</option>)}
               </select>
             </div>
             <div>
               <label className={labelCls}>Chofer *</label>
-              <select value={form.chofer_id} onChange={(e) => setForm({ ...form, chofer_id: e.target.value })} required className={inputCls}>
+              <select value={form.chofer_id} onChange={(e) => setForm({ ...form, chofer_id: e.target.value })} required={!form.vehiculo_externo_id} className={inputCls}>
                 <option value="">— Elegir —</option>
                 {choferes.map(c => <option key={c.id} value={c.id}>{c.nombre_completo}</option>)}
               </select>
