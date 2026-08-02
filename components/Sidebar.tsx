@@ -57,6 +57,7 @@ const navSections = [
     items: [
       { href: "/clientes", label: "Clientes", icon: Building2 },
       { href: "/proveedores", label: "Proveedores", icon: Fuel },
+      { href: "/tipos-gasto", label: "Tipos de Gasto", icon: DollarSign },
       { href: "/rutas", label: "Rutas", icon: MapPin },
       { href: "/recargas-combustible", label: "Recargas Combustible", icon: Fuel },
     ],
