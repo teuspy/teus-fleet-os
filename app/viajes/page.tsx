@@ -636,13 +636,13 @@ function ViajeModal({
                 </div>
                 <div>
                   <label className={labelCls}>Precio pagado al aliado (Gs)</label>
-                  <input type="number" value={form.precio_pagado_al_externo || 0}
+                  <input type="number" value={form.precio_pagado_al_externo || ""}
                     onChange={(e) => setForm({ ...form, precio_pagado_al_externo: parseInt(e.target.value) || 0 })}
                     className={inputCls} />
                 </div>
                 <div>
                   <label className={labelCls}>Comisión recibida (auto TL)</label>
-                  <input type="number" value={form.comision_recibida || 0}
+                  <input type="number" value={form.comision_recibida || ""}
                     onChange={(e) => setForm({ ...form, comision_recibida: parseInt(e.target.value) || 0 })}
                     className={inputCls} />
                 </div>
@@ -686,7 +686,11 @@ function ViajeModal({
             <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className={labelCls}>Precio flete (Gs.) *</label>
-                <input type="number" value={form.precio_flete} onChange={(e) => setForm({ ...form, precio_flete: parseInt(e.target.value) || 0 })} required className={inputCls} />
+                <input type="number" value={form.precio_flete || ""} onChange={(e) => {
+                const nuevoFlete = parseInt(e.target.value) || 0;
+                const nuevaComision = form.vehiculo_externo_id === "TL" ? Math.round(nuevoFlete * 0.05) : form.comision_recibida;
+                setForm({ ...form, precio_flete: nuevoFlete, comision_recibida: nuevaComision });
+              }} required className={inputCls} />
                 <div className="text-[10px] text-teus-accent font-bold mt-1">{fmtGs(form.precio_flete)}</div>
               </div>
               <div>
