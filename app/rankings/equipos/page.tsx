@@ -29,7 +29,7 @@ type Ranking = {
 
 const MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 
-function fmtGs(n: number) { const sign = n < 0 ? "-" : ""; return sign + "Gs. " + Math.abs(n).toLocaleString("es-PY"); }
+function fmtGs(n: number) { const sign = n < 0 ? "-" : ""; return sign + "Gs. " + Math.round(Math.abs(n)).toLocaleString("es-PY"); }
 function fmtGsShort(n: number) {
   const abs = Math.abs(n);
   const sign = n < 0 ? "-" : "";
