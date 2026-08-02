@@ -7,7 +7,7 @@ import Link from "next/link";
 
 function fmtGs(n: number) {
   const sign = n < 0 ? "-" : "";
-  return sign + "Gs. " + Math.abs(n || 0).toLocaleString("es-PY");
+  return sign + "Gs. " + Math.round(Math.abs(n || 0)).toLocaleString("es-PY");
 }
 
 const MESES_ES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
