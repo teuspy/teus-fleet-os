@@ -1,9 +1,7 @@
 "use client";
-
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Wallet, Loader2, Calendar, ArrowUpRight, ArrowDownLeft } from "lucide-react";
-
 type Viaje = {
   id: string;
   fecha: string;
@@ -25,19 +23,22 @@ type Viaje = {
   cliente?: { nombre: string } | null;
   vehiculo?: { alias: string | null; chapa: string } | null;
 };
-
+type PagoViatico = {
+  id: string;
+  fecha_pago: string;
+  monto: number;
+  semana_inicio: string;
+  notas: string | null;
+};
 const MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
-
 function fmtGs(n: number) {
   const sign = n < 0 ? "-" : "";
   return sign + "Gs. " + Math.round(Math.abs(n || 0)).toLocaleString("es-PY");
 }
-
 function fmtFecha(fechaStr: string) {
-  const [y, m, d] = fechaStr.split("T")[0].split("-");
+  const [, m, d] = fechaStr.split("T")[0].split("-");
   return `${d}/${m}`;
 }
-
 export default function ReconciliacionTLPage() {
   const supabase = createClient();
   const now = new Date();
@@ -45,25 +46,29 @@ export default function ReconciliacionTLPage() {
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [quincena, setQuincena] = useState<"1" | "2">(now.getDate() <= 15 ? "1" : "2");
   const [viajes, setViajes] = useState<Viaje[]>([]);
+  const [pagosViatico, setPagosViatico] = useState<PagoViatico[]>([]);
   const [loading, setLoading] = useState(true);
-
   async function loadData() {
     setLoading(true);
     const startDay = quincena === "1" ? "01" : "16";
     const endDay = quincena === "1" ? "15" : String(new Date(year, month, 0).getDate()).padStart(2, "0");
     const startDate = `${year}-${String(month).padStart(2, "0")}-${startDay}`;
     const endDate = `${year}-${String(month).padStart(2, "0")}-${endDay}`;
-
-    const { data } = await supabase.from("viajes")
-      .select("*, cliente:cliente_id(nombre), vehiculo:vehiculo_id(alias, chapa)")
-      .gte("fecha", startDate).lte("fecha", endDate)
-      .order("fecha");
-    setViajes((data as unknown as Viaje[]) || []);
+    const [viajesRes, pagosRes] = await Promise.all([
+      supabase.from("viajes")
+        .select("*, cliente:cliente_id(nombre), vehiculo:vehiculo_id(alias, chapa)")
+        .gte("fecha", startDate).lte("fecha", endDate)
+        .order("fecha"),
+      supabase.from("pagos_viatico")
+        .select("*")
+        .gte("fecha_pago", startDate).lte("fecha_pago", endDate)
+        .order("fecha_pago"),
+    ]);
+    setViajes((viajesRes.data as unknown as Viaje[]) || []);
+    setPagosViatico((pagosRes.data as unknown as PagoViatico[]) || []);
     setLoading(false);
   }
-
   useEffect(() => { loadData(); }, [year, month, quincena]);
-
   // DEBO A DAVID (débito)
   const debitos = useMemo(() => {
     // Combustible y viático: SOLO de viajes con camión PROPIO (no externo)
@@ -72,20 +77,17 @@ export default function ReconciliacionTLPage() {
     const totalCombustible = viajesConCamionPropio.reduce((s, v) => s + (v.costo_combustible || 0), 0);
     const totalLitros = viajesConCamionPropio.reduce((s, v) => s + (v.litros || 0), 0);
     const totalViatico = viajesConCamionPropio.reduce((s, v) => s + (v.viatico || 0), 0);
-
     // Fletes con camión TL (le debo el flete completo)
     const viajesConCamionTL = viajes.filter(v => v.vehiculo_externo_id === "TL");
     const totalFletesConTL = viajesConCamionTL.reduce((s, v) => s + (v.precio_flete || 0), 0);
     const totalComision = viajesConCamionTL.reduce((s, v) => s + (v.comision_recibida || 0), 0);
     const debeFletesTL = totalFletesConTL; // debo el flete completo, la comisión va al crédito
-
     return {
       totalCombustible, totalLitros, totalViatico, totalFletesConTL, totalComision, debeFletesTL,
       viajesConCamionPropio, viajesConCamionTL,
       total: totalCombustible + totalViatico + debeFletesTL,
     };
   }, [viajes]);
-
   // ME DEBE DAVID (crédito)
   const creditos = useMemo(() => {
     // Fletes hechos PARA TL (cliente contiene "T&L" y camión propio)
@@ -93,15 +95,15 @@ export default function ReconciliacionTLPage() {
       v.cliente?.nombre?.toUpperCase().includes("T&L") && !v.vehiculo_externo_id
     );
     const totalFletesParaTL = viajesParaTL.reduce((s, v) => s + (v.precio_flete || 0), 0);
-    const totalComisionRecibida = debitos.totalComision; // ya calculada arriba
+    const totalComisionRecibida = debitos.totalComision;
+    // NUEVO: Pagos de viáticos hechos en efectivo (semanales) durante esta quincena
+    const totalPagosViatico = pagosViatico.reduce((s, p) => s + (p.monto || 0), 0);
     return {
-      viajesParaTL, totalFletesParaTL, totalComisionRecibida,
-      total: totalFletesParaTL + totalComisionRecibida,
+      viajesParaTL, totalFletesParaTL, totalComisionRecibida, totalPagosViatico,
+      total: totalFletesParaTL + totalComisionRecibida + totalPagosViatico,
     };
-  }, [viajes, debitos]);
-
+  }, [viajes, debitos, pagosViatico]);
   const neto = debitos.total - creditos.total;
-
   return (
     <div className="px-8 py-6 pb-16">
       <div className="flex items-center justify-between mb-6">
@@ -126,7 +128,6 @@ export default function ReconciliacionTLPage() {
           </select>
         </div>
       </div>
-
       {/* CUADRO DE REGLAS - CHEAT SHEET */}
       <div className="bg-yellow-50 border-2 border-yellow-300 rounded-xl p-4 mb-6">
         <div className="text-sm font-black text-yellow-900 mb-2">📖 REGLAS DEL LIBRO CON DAVID (memorizá esto)</div>
@@ -136,7 +137,7 @@ export default function ReconciliacionTLPage() {
             <ul className="space-y-0.5">
               <li>⛽ Combustible que usé (litros × precio)</li>
               <li>💵 Viáticos que retiré (según ruta)</li>
-              <li>🚛 Fletes con SUS camiones (menos 5% comisión)</li>
+              <li>🚛 Fletes con SUS camiones (flete completo)</li>
             </ul>
           </div>
           <div>
@@ -144,12 +145,12 @@ export default function ReconciliacionTLPage() {
             <ul className="space-y-0.5">
               <li>🚛 Fletes que hice PARA él (con mis camiones)</li>
               <li>💰 5% de comisión sobre fletes con SUS camiones</li>
+              <li>💵 Pagos viáticos que le hice en efectivo (semanales)</li>
             </ul>
           </div>
         </div>
         <div className="text-xs text-yellow-900 mt-2 font-bold">🎯 NETEO = DEBO − ME DEBE. Positivo = yo pago. Negativo = él paga.</div>
       </div>
-
       {loading ? (
         <div className="p-16 text-center text-teus-text_muted">
           <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2" />Cargando...
@@ -178,7 +179,7 @@ export default function ReconciliacionTLPage() {
                   <div className="flex justify-between items-baseline">
                     <div>
                       <div className="text-xs uppercase font-bold text-red-700">💵 Viáticos</div>
-                      <div className="text-[10px] text-red-600 mt-0.5">retirados de la estación</div>
+                      <div className="text-[10px] text-red-600 mt-0.5">retirados de la estación (bruto)</div>
                     </div>
                     <div className="text-lg font-black text-red-900">{fmtGs(debitos.totalViatico)}</div>
                   </div>
@@ -198,7 +199,6 @@ export default function ReconciliacionTLPage() {
                 </div>
               </div>
             </div>
-
             {/* CRÉDITO */}
             <div className="bg-green-50 border-2 border-green-300 rounded-2xl p-5 shadow-card">
               <div className="flex items-center gap-2 mb-4">
@@ -224,6 +224,15 @@ export default function ReconciliacionTLPage() {
                     <div className="text-lg font-black text-green-900">{fmtGs(creditos.totalComisionRecibida)}</div>
                   </div>
                 </div>
+                <div className="bg-white rounded-lg p-3 border border-green-200">
+                  <div className="flex justify-between items-baseline">
+                    <div>
+                      <div className="text-xs uppercase font-bold text-green-700">💵 Pagos viáticos en efectivo</div>
+                      <div className="text-[10px] text-green-600 mt-0.5">{pagosViatico.length} {pagosViatico.length === 1 ? "pago semanal" : "pagos semanales"} en esta quincena</div>
+                    </div>
+                    <div className="text-lg font-black text-green-900">{fmtGs(creditos.totalPagosViatico)}</div>
+                  </div>
+                </div>
                 <div className="bg-green-600 text-white rounded-lg p-4 mt-4">
                   <div className="text-xs uppercase font-bold opacity-90">TOTAL ME DEBE</div>
                   <div className="text-3xl font-black">{fmtGs(creditos.total)}</div>
@@ -231,7 +240,6 @@ export default function ReconciliacionTLPage() {
               </div>
             </div>
           </div>
-
           {/* NETEO FINAL */}
           <div className="bg-gradient-to-br from-teus-text_dark to-gray-900 text-white rounded-2xl p-6 shadow-2xl mb-6">
             <div className="text-xs uppercase tracking-widest opacity-70 mb-3">🎯 NETEO FINAL</div>
@@ -252,7 +260,6 @@ export default function ReconciliacionTLPage() {
               </div>
             </div>
           </div>
-
           {/* DETALLE VIAJES CON CAMIÓN PROPIO (para combustible/viático) */}
           <details className="bg-teus-card_light border border-teus-border_light rounded-xl mb-4 shadow-card">
             <summary className="cursor-pointer px-5 py-3 font-bold text-teus-text_dark hover:bg-teus-bg_soft">
@@ -287,7 +294,36 @@ export default function ReconciliacionTLPage() {
               </table>
             </div>
           </details>
-
+          {/* DETALLE PAGOS DE VIÁTICOS EN EFECTIVO */}
+          {pagosViatico.length > 0 && (
+            <details className="bg-teus-card_light border border-teus-border_light rounded-xl mb-4 shadow-card">
+              <summary className="cursor-pointer px-5 py-3 font-bold text-teus-text_dark hover:bg-teus-bg_soft">
+                📋 Detalle: {pagosViatico.length} pagos de viáticos en efectivo (esta quincena)
+              </summary>
+              <div className="overflow-x-auto p-3">
+                <table className="w-full text-xs">
+                  <thead className="bg-teus-bg_soft">
+                    <tr>
+                      <th className="text-left p-2">Fecha pago</th>
+                      <th className="text-left p-2">Semana pagada</th>
+                      <th className="text-left p-2">Notas</th>
+                      <th className="text-right p-2">Monto</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pagosViatico.map(p => (
+                      <tr key={p.id} className="border-t border-teus-border_light">
+                        <td className="p-2">{fmtFecha(p.fecha_pago)}</td>
+                        <td className="p-2">Lun {fmtFecha(p.semana_inicio)}</td>
+                        <td className="p-2">{p.notas || "-"}</td>
+                        <td className="p-2 text-right font-bold text-green-600">{fmtGs(p.monto)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          )}
           {/* DETALLE FLETES PARA TL */}
           {creditos.viajesParaTL.length > 0 && (
             <details className="bg-teus-card_light border border-teus-border_light rounded-xl mb-4 shadow-card">
@@ -320,7 +356,6 @@ export default function ReconciliacionTLPage() {
               </div>
             </details>
           )}
-
           {/* DETALLE FLETES CON CAMIÓN TL */}
           {debitos.viajesConCamionTL.length > 0 && (
             <details className="bg-teus-card_light border border-teus-border_light rounded-xl shadow-card">
