@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Wallet, Loader2, Calendar, ArrowRight, Users } from "lucide-react";
+import { Wallet, Loader2, Calendar, ArrowUpRight, ArrowDownLeft } from "lucide-react";
 
 type Viaje = {
   id: string;
@@ -15,6 +15,8 @@ type Viaje = {
   destino: string;
   precio_flete: number;
   costo_combustible: number;
+  litros: number;
+  gs_por_litro: number;
   viatico: number;
   otros_costos: number;
   precio_pagado_al_externo: number;
@@ -24,7 +26,6 @@ type Viaje = {
   vehiculo?: { alias: string | null; chapa: string } | null;
 };
 
-const CLIENTE_TL_NOMBRE = "TL";
 const MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 
 function fmtGs(n: number) {
@@ -63,43 +64,53 @@ export default function ReconciliacionTLPage() {
 
   useEffect(() => { loadData(); }, [year, month, quincena]);
 
-  const flujoA = useMemo(() => {
-    const viajesA = viajes.filter(v => v.cliente?.nombre?.toUpperCase() === CLIENTE_TL_NOMBRE && !v.vehiculo_externo_id);
-    const totalFletes = viajesA.reduce((s, v) => s + (v.precio_flete || 0), 0);
-    const totalCombustible = viajesA.reduce((s, v) => s + (v.costo_combustible || 0), 0);
-    const totalViaticos = viajesA.reduce((s, v) => s + (v.viatico || 0), 0);
-    const totalOtros = viajesA.reduce((s, v) => s + (v.otros_costos || 0), 0);
-    const neto = totalFletes - totalCombustible - totalViaticos - totalOtros;
-    return { viajes: viajesA, totalFletes, totalCombustible, totalViaticos, totalOtros, neto };
+  // DEBO A DAVID (débito)
+  const debitos = useMemo(() => {
+    // Combustible y viático: SOLO de viajes con camión PROPIO (no externo)
+    // Porque cuando uso camión de TL, David paga combustible/viático de su bolsillo (Opción A)
+    const viajesConCamionPropio = viajes.filter(v => !v.vehiculo_externo_id);
+    const totalCombustible = viajesConCamionPropio.reduce((s, v) => s + (v.costo_combustible || 0), 0);
+    const totalLitros = viajesConCamionPropio.reduce((s, v) => s + (v.litros || 0), 0);
+    const totalViatico = viajesConCamionPropio.reduce((s, v) => s + (v.viatico || 0), 0);
+
+    // Fletes con camión TL (le debo el flete completo)
+    const viajesConCamionTL = viajes.filter(v => v.vehiculo_externo_id === "TL");
+    const totalFletesConTL = viajesConCamionTL.reduce((s, v) => s + (v.precio_flete || 0), 0);
+    const totalComision = viajesConCamionTL.reduce((s, v) => s + (v.comision_recibida || 0), 0);
+    const debeFletesTL = totalFletesConTL - totalComision; // neto que debo a TL
+
+    return {
+      totalCombustible, totalLitros, totalViatico, totalFletesConTL, totalComision, debeFletesTL,
+      viajesConCamionPropio, viajesConCamionTL,
+      total: totalCombustible + totalViatico + debeFletesTL,
+    };
   }, [viajes]);
 
-  const flujoB = useMemo(() => {
-    const viajesB = viajes.filter(v => v.vehiculo_externo_id === "TL");
-    const totalFletes = viajesB.reduce((s, v) => s + (v.precio_flete || 0), 0);
-    const totalComision = viajesB.reduce((s, v) => s + (v.comision_recibida || 0), 0);
-    const debeATL = totalFletes - totalComision;
-    return { viajes: viajesB, totalFletes, totalComision, debeATL };
-  }, [viajes]);
+  // ME DEBE DAVID (crédito)
+  const creditos = useMemo(() => {
+    // Fletes hechos PARA TL (cliente contiene "T&L" y camión propio)
+    const viajesParaTL = viajes.filter(v => 
+      v.cliente?.nombre?.toUpperCase().includes("T&L") && !v.vehiculo_externo_id
+    );
+    const totalFletesParaTL = viajesParaTL.reduce((s, v) => s + (v.precio_flete || 0), 0);
+    const totalComisionRecibida = debitos.totalComision; // ya calculada arriba
+    return {
+      viajesParaTL, totalFletesParaTL, totalComisionRecibida,
+      total: totalFletesParaTL + totalComisionRecibida,
+    };
+  }, [viajes, debitos]);
 
-  const flujoC = useMemo(() => {
-    const viajesC = viajes.filter(v => v.vehiculo_externo_id === "ELVIO");
-    const totalPagadoAElvio = viajesC.reduce((s, v) => s + (v.precio_pagado_al_externo || 0), 0);
-    const totalCobrado = viajesC.reduce((s, v) => s + (v.precio_flete || 0), 0);
-    const margen = totalCobrado - totalPagadoAElvio;
-    return { viajes: viajesC, totalPagadoAElvio, totalCobrado, margen };
-  }, [viajes]);
-
-  const netoConTL = flujoB.debeATL - flujoA.neto;
+  const neto = debitos.total - creditos.total;
 
   return (
     <div className="px-8 py-6 pb-16">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-3xl font-black tracking-tight text-teus-text_dark flex items-center gap-3">
+          <h1 className="text-3xl font-black text-teus-text_dark flex items-center gap-3">
             <Wallet className="w-8 h-8 text-teus-accent" />
-            Reconciliación con Aliados
+            Reconciliación con David (TL)
           </h1>
-          <p className="text-sm text-teus-text_muted mt-1">Neteo automático quincenal con TL y compra/venta con Elvio</p>
+          <p className="text-sm text-teus-text_muted mt-1">Libro de contabilidad quincenal · Débitos / Créditos / Neteo automático</p>
         </div>
         <div className="flex items-center gap-3 bg-teus-card_light border border-teus-border_light rounded-xl px-4 py-2 shadow-card">
           <Calendar className="w-4 h-4 text-teus-accent" />
@@ -116,175 +127,235 @@ export default function ReconciliacionTLPage() {
         </div>
       </div>
 
+      {/* CUADRO DE REGLAS - CHEAT SHEET */}
+      <div className="bg-yellow-50 border-2 border-yellow-300 rounded-xl p-4 mb-6">
+        <div className="text-sm font-black text-yellow-900 mb-2">📖 REGLAS DEL LIBRO CON DAVID (memorizá esto)</div>
+        <div className="grid grid-cols-2 gap-4 text-xs text-yellow-900">
+          <div>
+            <div className="font-bold mb-1">💸 YO LE DEBO A DAVID:</div>
+            <ul className="space-y-0.5">
+              <li>⛽ Combustible que usé (litros × precio)</li>
+              <li>💵 Viáticos que retiré (según ruta)</li>
+              <li>🚛 Fletes con SUS camiones (menos 5% comisión)</li>
+            </ul>
+          </div>
+          <div>
+            <div className="font-bold mb-1">💰 DAVID ME DEBE:</div>
+            <ul className="space-y-0.5">
+              <li>🚛 Fletes que hice PARA él (con mis camiones)</li>
+              <li>💰 5% de comisión sobre fletes con SUS camiones</li>
+            </ul>
+          </div>
+        </div>
+        <div className="text-xs text-yellow-900 mt-2 font-bold">🎯 NETEO = DEBO − ME DEBE. Positivo = yo pago. Negativo = él paga.</div>
+      </div>
+
       {loading ? (
         <div className="p-16 text-center text-teus-text_muted">
-          <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2" />
-          Cargando...
+          <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2" />Cargando...
         </div>
       ) : (
         <>
-          <div className="bg-teus-accent/5 border border-teus-accent/30 rounded-2xl p-5 mb-4 shadow-card">
-            <div className="flex items-center gap-2 mb-3">
-              <ArrowRight className="w-5 h-5 text-teus-accent rotate-180" />
-              <h2 className="text-lg font-black text-teus-text_dark">🅰️ Teus HIZO viajes PARA TL (con camiones Teus)</h2>
-              <span className="ml-auto text-xs bg-teus-accent/20 text-teus-accent-dark px-2 py-1 rounded font-bold">{flujoA.viajes.length} viajes</span>
-            </div>
-            <div className="grid grid-cols-5 gap-3 mb-3">
-              <div className="bg-white rounded-lg p-3">
-                <div className="text-[10px] uppercase font-bold text-teus-text_muted">Fletes</div>
-                <div className="text-lg font-black text-teus-text_dark">{fmtGs(flujoA.totalFletes)}</div>
+          {/* TABLA DÉBITO / CRÉDITO */}
+          <div className="grid grid-cols-2 gap-4 mb-6">
+            {/* DÉBITO */}
+            <div className="bg-red-50 border-2 border-red-300 rounded-2xl p-5 shadow-card">
+              <div className="flex items-center gap-2 mb-4">
+                <ArrowUpRight className="w-5 h-5 text-red-600" />
+                <h2 className="text-lg font-black text-red-900">💸 YO LE DEBO A DAVID</h2>
               </div>
-              <div className="bg-white rounded-lg p-3">
-                <div className="text-[10px] uppercase font-bold text-teus-text_muted">(−) Combustible</div>
-                <div className="text-lg font-black text-teus-danger">{fmtGs(flujoA.totalCombustible)}</div>
-              </div>
-              <div className="bg-white rounded-lg p-3">
-                <div className="text-[10px] uppercase font-bold text-teus-text_muted">(−) Viáticos</div>
-                <div className="text-lg font-black text-teus-danger">{fmtGs(flujoA.totalViaticos)}</div>
-              </div>
-              <div className="bg-white rounded-lg p-3">
-                <div className="text-[10px] uppercase font-bold text-teus-text_muted">(−) Otros</div>
-                <div className="text-lg font-black text-teus-danger">{fmtGs(flujoA.totalOtros)}</div>
-              </div>
-              <div className="bg-teus-accent text-white rounded-lg p-3">
-                <div className="text-[10px] uppercase font-bold opacity-80">= TL debe a Teus</div>
-                <div className="text-lg font-black">{fmtGs(flujoA.neto)}</div>
-              </div>
-            </div>
-            {flujoA.viajes.length > 0 && (
-              <details className="mt-3">
-                <summary className="text-xs font-bold text-teus-accent cursor-pointer">Ver detalle de los {flujoA.viajes.length} viajes</summary>
-                <div className="overflow-x-auto mt-2">
-                  <table className="w-full text-xs">
-                    <thead className="bg-white text-teus-text_muted">
-                      <tr>
-                        <th className="text-left p-2">Fecha</th>
-                        <th className="text-left p-2">Ruta</th>
-                        <th className="text-left p-2">Contenedor</th>
-                        <th className="text-left p-2">Equipo</th>
-                        <th className="text-right p-2">Flete</th>
-                        <th className="text-right p-2">Comb</th>
-                        <th className="text-right p-2">Viát</th>
-                        <th className="text-right p-2">Neto</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {flujoA.viajes.map(v => (
-                        <tr key={v.id} className="border-t border-teus-border_light">
-                          <td className="p-2">{fmtFecha(v.fecha)}</td>
-                          <td className="p-2">{v.origen}→{v.destino}</td>
-                          <td className="p-2 font-mono text-[10px]">{v.nro_contenedor || "-"}</td>
-                          <td className="p-2">{v.vehiculo?.alias || "-"}</td>
-                          <td className="p-2 text-right">{fmtGs(v.precio_flete)}</td>
-                          <td className="p-2 text-right text-teus-danger">{fmtGs(v.costo_combustible)}</td>
-                          <td className="p-2 text-right text-teus-danger">{fmtGs(v.viatico)}</td>
-                          <td className="p-2 text-right font-bold text-teus-accent">{fmtGs(v.precio_flete - v.costo_combustible - v.viatico - (v.otros_costos || 0))}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+              <div className="space-y-3">
+                <div className="bg-white rounded-lg p-3 border border-red-200">
+                  <div className="flex justify-between items-baseline">
+                    <div>
+                      <div className="text-xs uppercase font-bold text-red-700">⛽ Combustible</div>
+                      <div className="text-[10px] text-red-600 mt-0.5">{debitos.totalLitros.toLocaleString("es-PY")} lts × precio del mes</div>
+                    </div>
+                    <div className="text-lg font-black text-red-900">{fmtGs(debitos.totalCombustible)}</div>
+                  </div>
                 </div>
-              </details>
-            )}
+                <div className="bg-white rounded-lg p-3 border border-red-200">
+                  <div className="flex justify-between items-baseline">
+                    <div>
+                      <div className="text-xs uppercase font-bold text-red-700">💵 Viáticos</div>
+                      <div className="text-[10px] text-red-600 mt-0.5">retirados de la estación</div>
+                    </div>
+                    <div className="text-lg font-black text-red-900">{fmtGs(debitos.totalViatico)}</div>
+                  </div>
+                </div>
+                <div className="bg-white rounded-lg p-3 border border-red-200">
+                  <div className="flex justify-between items-baseline">
+                    <div>
+                      <div className="text-xs uppercase font-bold text-red-700">🚛 Fletes con camión TL</div>
+                      <div className="text-[10px] text-red-600 mt-0.5">{debitos.viajesConCamionTL.length} viajes · menos 5% comisión</div>
+                    </div>
+                    <div className="text-lg font-black text-red-900">{fmtGs(debitos.debeFletesTL)}</div>
+                  </div>
+                </div>
+                <div className="bg-red-600 text-white rounded-lg p-4 mt-4">
+                  <div className="text-xs uppercase font-bold opacity-90">TOTAL DEBO</div>
+                  <div className="text-3xl font-black">{fmtGs(debitos.total)}</div>
+                </div>
+              </div>
+            </div>
+
+            {/* CRÉDITO */}
+            <div className="bg-green-50 border-2 border-green-300 rounded-2xl p-5 shadow-card">
+              <div className="flex items-center gap-2 mb-4">
+                <ArrowDownLeft className="w-5 h-5 text-green-600" />
+                <h2 className="text-lg font-black text-green-900">💰 DAVID ME DEBE</h2>
+              </div>
+              <div className="space-y-3">
+                <div className="bg-white rounded-lg p-3 border border-green-200">
+                  <div className="flex justify-between items-baseline">
+                    <div>
+                      <div className="text-xs uppercase font-bold text-green-700">🚛 Fletes hechos PARA TL</div>
+                      <div className="text-[10px] text-green-600 mt-0.5">{creditos.viajesParaTL.length} viajes · con mis camiones</div>
+                    </div>
+                    <div className="text-lg font-black text-green-900">{fmtGs(creditos.totalFletesParaTL)}</div>
+                  </div>
+                </div>
+                <div className="bg-white rounded-lg p-3 border border-green-200">
+                  <div className="flex justify-between items-baseline">
+                    <div>
+                      <div className="text-xs uppercase font-bold text-green-700">💰 Comisión 5%</div>
+                      <div className="text-[10px] text-green-600 mt-0.5">sobre fletes con camiones TL</div>
+                    </div>
+                    <div className="text-lg font-black text-green-900">{fmtGs(creditos.totalComisionRecibida)}</div>
+                  </div>
+                </div>
+                <div className="bg-green-600 text-white rounded-lg p-4 mt-4">
+                  <div className="text-xs uppercase font-bold opacity-90">TOTAL ME DEBE</div>
+                  <div className="text-3xl font-black">{fmtGs(creditos.total)}</div>
+                </div>
+              </div>
+            </div>
           </div>
 
-          <div className="bg-orange-50 border border-orange-300 rounded-2xl p-5 mb-4 shadow-card">
-            <div className="flex items-center gap-2 mb-3">
-              <ArrowRight className="w-5 h-5 text-orange-600" />
-              <h2 className="text-lg font-black text-teus-text_dark">🅱️ Teus USÓ camiones de TL (para clientes Teus)</h2>
-              <span className="ml-auto text-xs bg-orange-200 text-orange-800 px-2 py-1 rounded font-bold">{flujoB.viajes.length} viajes</span>
-            </div>
-            <div className="grid grid-cols-3 gap-3 mb-3">
-              <div className="bg-white rounded-lg p-3">
-                <div className="text-[10px] uppercase font-bold text-teus-text_muted">Total fletes con camiones TL</div>
-                <div className="text-lg font-black text-teus-text_dark">{fmtGs(flujoB.totalFletes)}</div>
-              </div>
-              <div className="bg-white rounded-lg p-3">
-                <div className="text-[10px] uppercase font-bold text-teus-text_muted">(−) Comisión 5% Teus</div>
-                <div className="text-lg font-black text-teus-accent">{fmtGs(flujoB.totalComision)}</div>
-              </div>
-              <div className="bg-orange-500 text-white rounded-lg p-3">
-                <div className="text-[10px] uppercase font-bold opacity-80">= Teus debe a TL</div>
-                <div className="text-lg font-black">{fmtGs(flujoB.debeATL)}</div>
-              </div>
-            </div>
-            {flujoB.viajes.length > 0 && (
-              <details className="mt-3">
-                <summary className="text-xs font-bold text-orange-700 cursor-pointer">Ver detalle de los {flujoB.viajes.length} viajes</summary>
-                <div className="overflow-x-auto mt-2">
-                  <table className="w-full text-xs">
-                    <thead className="bg-white text-teus-text_muted">
-                      <tr>
-                        <th className="text-left p-2">Fecha</th>
-                        <th className="text-left p-2">Cliente</th>
-                        <th className="text-left p-2">Chofer TL</th>
-                        <th className="text-left p-2">Ruta</th>
-                        <th className="text-right p-2">Flete</th>
-                        <th className="text-right p-2">Comisión 5%</th>
-                        <th className="text-right p-2">Debo a TL</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {flujoB.viajes.map(v => (
-                        <tr key={v.id} className="border-t border-teus-border_light">
-                          <td className="p-2">{fmtFecha(v.fecha)}</td>
-                          <td className="p-2">{v.cliente?.nombre || "-"}</td>
-                          <td className="p-2">{v.chofer_externo_nombre || "-"}</td>
-                          <td className="p-2">{v.origen}→{v.destino}</td>
-                          <td className="p-2 text-right">{fmtGs(v.precio_flete)}</td>
-                          <td className="p-2 text-right text-teus-accent">{fmtGs(v.comision_recibida)}</td>
-                          <td className="p-2 text-right font-bold text-orange-600">{fmtGs(v.precio_flete - v.comision_recibida)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </details>
-            )}
-          </div>
-
-          <div className="bg-gradient-to-br from-teus-text_dark to-gray-900 text-white rounded-2xl p-6 mb-6 shadow-2xl">
-            <div className="text-xs uppercase tracking-widest opacity-70 mb-2">🎯 NETEO FINAL con TL</div>
+          {/* NETEO FINAL */}
+          <div className="bg-gradient-to-br from-teus-text_dark to-gray-900 text-white rounded-2xl p-6 shadow-2xl mb-6">
+            <div className="text-xs uppercase tracking-widest opacity-70 mb-3">🎯 NETEO FINAL</div>
             <div className="grid grid-cols-3 gap-4 items-center">
               <div>
-                <div className="text-xs opacity-70">Teus debe a TL (B)</div>
-                <div className="text-2xl font-black">{fmtGs(flujoB.debeATL)}</div>
+                <div className="text-xs opacity-70">DEBO A DAVID</div>
+                <div className="text-2xl font-black text-red-300">{fmtGs(debitos.total)}</div>
               </div>
               <div>
-                <div className="text-xs opacity-70">(−) TL debe a Teus (A)</div>
-                <div className="text-2xl font-black">{fmtGs(flujoA.neto)}</div>
+                <div className="text-xs opacity-70">(−) DAVID ME DEBE</div>
+                <div className="text-2xl font-black text-green-300">{fmtGs(creditos.total)}</div>
               </div>
-              <div className={`p-4 rounded-xl ${netoConTL >= 0 ? "bg-orange-500" : "bg-teus-accent"}`}>
+              <div className={`p-4 rounded-xl ${neto >= 0 ? "bg-red-500" : "bg-green-500"}`}>
                 <div className="text-xs opacity-90 font-bold uppercase">
-                  {netoConTL >= 0 ? "➡️ Teus PAGA a TL" : "⬅️ TL PAGA a Teus"}
+                  {neto >= 0 ? "➡️ YO LE PAGO A DAVID" : "⬅️ DAVID ME PAGA A MÍ"}
                 </div>
-                <div className="text-3xl font-black">{fmtGs(Math.abs(netoConTL))}</div>
+                <div className="text-3xl font-black">{fmtGs(Math.abs(neto))}</div>
               </div>
             </div>
           </div>
 
-          {flujoC.viajes.length > 0 && (
-            <div className="bg-purple-50 border border-purple-300 rounded-2xl p-5 shadow-card">
-              <div className="flex items-center gap-2 mb-3">
-                <Users className="w-5 h-5 text-purple-600" />
-                <h2 className="text-lg font-black text-teus-text_dark">🅲 Compra/venta con Elvio González</h2>
-                <span className="ml-auto text-xs bg-purple-200 text-purple-800 px-2 py-1 rounded font-bold">{flujoC.viajes.length} viajes</span>
-              </div>
-              <div className="grid grid-cols-3 gap-3">
-                <div className="bg-white rounded-lg p-3">
-                  <div className="text-[10px] uppercase font-bold text-teus-text_muted">Cobrado a clientes</div>
-                  <div className="text-lg font-black text-teus-text_dark">{fmtGs(flujoC.totalCobrado)}</div>
-                </div>
-                <div className="bg-purple-500 text-white rounded-lg p-3">
-                  <div className="text-[10px] uppercase font-bold opacity-90">Teus debe a Elvio</div>
-                  <div className="text-lg font-black">{fmtGs(flujoC.totalPagadoAElvio)}</div>
-                </div>
-                <div className={`rounded-lg p-3 ${flujoC.margen >= 0 ? "bg-teus-accent" : "bg-teus-danger"} text-white`}>
-                  <div className="text-[10px] uppercase font-bold opacity-90">Margen Teus</div>
-                  <div className="text-lg font-black">{fmtGs(flujoC.margen)}</div>
-                </div>
-              </div>
+          {/* DETALLE VIAJES CON CAMIÓN PROPIO (para combustible/viático) */}
+          <details className="bg-teus-card_light border border-teus-border_light rounded-xl mb-4 shadow-card">
+            <summary className="cursor-pointer px-5 py-3 font-bold text-teus-text_dark hover:bg-teus-bg_soft">
+              📋 Detalle: {debitos.viajesConCamionPropio.length} viajes con camión propio (para combustible/viático)
+            </summary>
+            <div className="overflow-x-auto p-3">
+              <table className="w-full text-xs">
+                <thead className="bg-teus-bg_soft">
+                  <tr>
+                    <th className="text-left p-2">Fecha</th>
+                    <th className="text-left p-2">Cliente</th>
+                    <th className="text-left p-2">Ruta</th>
+                    <th className="text-left p-2">Equipo</th>
+                    <th className="text-right p-2">Litros</th>
+                    <th className="text-right p-2">Combustible</th>
+                    <th className="text-right p-2">Viático</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {debitos.viajesConCamionPropio.map(v => (
+                    <tr key={v.id} className="border-t border-teus-border_light">
+                      <td className="p-2">{fmtFecha(v.fecha)}</td>
+                      <td className="p-2">{v.cliente?.nombre || "-"}</td>
+                      <td className="p-2">{v.origen}→{v.destino}</td>
+                      <td className="p-2">{v.vehiculo?.alias || "-"}</td>
+                      <td className="p-2 text-right">{v.litros}</td>
+                      <td className="p-2 text-right text-red-600 font-bold">{fmtGs(v.costo_combustible)}</td>
+                      <td className="p-2 text-right text-red-600 font-bold">{fmtGs(v.viatico)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
+          </details>
+
+          {/* DETALLE FLETES PARA TL */}
+          {creditos.viajesParaTL.length > 0 && (
+            <details className="bg-teus-card_light border border-teus-border_light rounded-xl mb-4 shadow-card">
+              <summary className="cursor-pointer px-5 py-3 font-bold text-teus-text_dark hover:bg-teus-bg_soft">
+                📋 Detalle: {creditos.viajesParaTL.length} fletes hechos PARA David
+              </summary>
+              <div className="overflow-x-auto p-3">
+                <table className="w-full text-xs">
+                  <thead className="bg-teus-bg_soft">
+                    <tr>
+                      <th className="text-left p-2">Fecha</th>
+                      <th className="text-left p-2">Contenedor</th>
+                      <th className="text-left p-2">Ruta</th>
+                      <th className="text-left p-2">Equipo</th>
+                      <th className="text-right p-2">Flete</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {creditos.viajesParaTL.map(v => (
+                      <tr key={v.id} className="border-t border-teus-border_light">
+                        <td className="p-2">{fmtFecha(v.fecha)}</td>
+                        <td className="p-2 font-mono">{v.nro_contenedor || "-"}</td>
+                        <td className="p-2">{v.origen}→{v.destino}</td>
+                        <td className="p-2">{v.vehiculo?.alias || "-"}</td>
+                        <td className="p-2 text-right font-bold text-green-600">{fmtGs(v.precio_flete)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          )}
+
+          {/* DETALLE FLETES CON CAMIÓN TL */}
+          {debitos.viajesConCamionTL.length > 0 && (
+            <details className="bg-teus-card_light border border-teus-border_light rounded-xl shadow-card">
+              <summary className="cursor-pointer px-5 py-3 font-bold text-teus-text_dark hover:bg-teus-bg_soft">
+                📋 Detalle: {debitos.viajesConCamionTL.length} fletes con camión de David
+              </summary>
+              <div className="overflow-x-auto p-3">
+                <table className="w-full text-xs">
+                  <thead className="bg-teus-bg_soft">
+                    <tr>
+                      <th className="text-left p-2">Fecha</th>
+                      <th className="text-left p-2">Cliente</th>
+                      <th className="text-left p-2">Chofer TL</th>
+                      <th className="text-left p-2">Ruta</th>
+                      <th className="text-right p-2">Flete</th>
+                      <th className="text-right p-2">Comisión 5%</th>
+                      <th className="text-right p-2">Debo neto</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {debitos.viajesConCamionTL.map(v => (
+                      <tr key={v.id} className="border-t border-teus-border_light">
+                        <td className="p-2">{fmtFecha(v.fecha)}</td>
+                        <td className="p-2">{v.cliente?.nombre || "-"}</td>
+                        <td className="p-2">{v.chofer_externo_nombre || "-"}</td>
+                        <td className="p-2">{v.origen}→{v.destino}</td>
+                        <td className="p-2 text-right">{fmtGs(v.precio_flete)}</td>
+                        <td className="p-2 text-right text-green-600">{fmtGs(v.comision_recibida)}</td>
+                        <td className="p-2 text-right font-bold text-red-600">{fmtGs(v.precio_flete - v.comision_recibida)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </details>
           )}
         </>
       )}
