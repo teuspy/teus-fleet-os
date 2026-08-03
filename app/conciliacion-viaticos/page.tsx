@@ -22,8 +22,9 @@ type Viaje = {
   viatico: number;
   origen: string;
   destino: string;
-  chofer?: { nombre: string } | null;
+  chofer_id: string | null;
   vehiculo?: { alias: string | null; chapa: string } | null;
+  chofer?: { nombre: string } | null;
 };
 
 type PagoViatico = {
@@ -38,7 +39,7 @@ type PagoViatico = {
 // ---------- Helpers de fecha ----------
 function getLunes(date: Date): Date {
   const d = new Date(date.getTime());
-  const day = d.getDay(); // 0=dom, 1=lun, ..., 6=sab
+  const day = d.getDay();
   const diff = day === 0 ? -6 : 1 - day;
   d.setDate(d.getDate() + diff);
   d.setHours(0, 0, 0, 0);
@@ -91,21 +92,39 @@ export default function ConciliacionViaticos() {
 
   async function loadData() {
     setLoading(true);
-    const { data: dViajes } = await supabase
-      .from("viajes")
-      .select("*, vehiculo:vehiculos(alias, chapa), chofer:choferes(nombre)")
-      .gte("fecha", toISO(lunes))
-      .lte("fecha", toISO(domingo))
-      .is("vehiculo_externo_id", null); // solo camiones propios
-    setViajes((dViajes as any) || []);
 
-    const { data: dPagos } = await supabase
-      .from("pagos_viatico")
-      .select("*")
-      .eq("semana_inicio", semanaISO)
-      .order("fecha_pago", { ascending: true });
-    setPagos((dPagos as any) || []);
+    const [viajesRes, vehRes, chofRes, pagosRes] = await Promise.all([
+      supabase
+        .from("viajes")
+        .select("*")
+        .gte("fecha", toISO(lunes))
+        .lte("fecha", toISO(domingo)),
+      supabase.from("vehiculos").select("id, alias, chapa"),
+      supabase.from("choferes").select("id, nombre"),
+      supabase
+        .from("pagos_viatico")
+        .select("*")
+        .eq("semana_inicio", semanaISO)
+        .order("fecha_pago", { ascending: true }),
+    ]);
 
+    const vehiculosMap = new Map(
+      ((vehRes.data as any[]) || []).map((v) => [v.id, v])
+    );
+    const choferesMap = new Map(
+      ((chofRes.data as any[]) || []).map((c) => [c.id, c])
+    );
+
+    const viajesEnriquecidos: Viaje[] = ((viajesRes.data as any[]) || [])
+      .filter((v: any) => !v.vehiculo_externo_id)
+      .map((v: any) => ({
+        ...v,
+        vehiculo: v.vehiculo_id ? vehiculosMap.get(v.vehiculo_id) : null,
+        chofer: v.chofer_id ? choferesMap.get(v.chofer_id) : null,
+      }));
+
+    setViajes(viajesEnriquecidos);
+    setPagos((pagosRes.data as any[]) || []);
     setLoading(false);
   }
 
@@ -210,10 +229,9 @@ export default function ConciliacionViaticos() {
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
-      {/* Header */}
       <div className="flex items-center gap-3 mb-2">
-        <Wallet className="w-8 h-8 text-teus-primary" />
-        <h1 className="text-2xl font-black text-teus-text-dark">
+        <Wallet className="w-8 h-8 text-green-700" />
+        <h1 className="text-2xl font-black text-gray-900">
           Conciliación Viáticos Semanal
         </h1>
       </div>
@@ -221,8 +239,7 @@ export default function ConciliacionViaticos() {
         Pagos semanales a David (TL) · Soporta pagos parciales
       </p>
 
-      {/* Selector de semana */}
-      <div className="bg-white rounded-xl shadow-card p-4 mb-6 flex items-center justify-between">
+      <div className="bg-white rounded-xl shadow p-4 mb-6 flex items-center justify-between">
         <button
           onClick={semanaAnterior}
           className="p-2 rounded-lg hover:bg-gray-100 transition"
@@ -231,12 +248,12 @@ export default function ConciliacionViaticos() {
         </button>
         <div className="text-center">
           <div className="text-xs text-gray-500 uppercase font-bold">Semana</div>
-          <div className="text-lg font-black text-teus-text-dark">
+          <div className="text-lg font-black text-gray-900">
             Lun {fmtFechaLarga(lunes)} → Dom {fmtFechaLarga(domingo)}
           </div>
           <button
             onClick={semanaActual}
-            className="text-xs text-teus-primary hover:underline mt-1"
+            className="text-xs text-green-700 hover:underline mt-1"
           >
             Ir a semana actual
           </button>
@@ -251,24 +268,23 @@ export default function ConciliacionViaticos() {
 
       {loading ? (
         <div className="flex justify-center py-12">
-          <Loader2 className="w-8 h-8 animate-spin text-teus-primary" />
+          <Loader2 className="w-8 h-8 animate-spin text-green-700" />
         </div>
       ) : (
         <>
-          {/* KPIs */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-            <div className="bg-white rounded-xl shadow-card p-4">
+            <div className="bg-white rounded-xl shadow p-4">
               <div className="text-xs text-gray-500 uppercase font-bold">
                 Viáticos generados
               </div>
-              <div className="text-2xl font-black text-teus-text-dark mt-1">
+              <div className="text-2xl font-black text-gray-900 mt-1">
                 {fmtGs(totalGenerado)}
               </div>
               <div className="text-xs text-gray-500 mt-1">
                 {viajes.length} viajes con camión propio
               </div>
             </div>
-            <div className="bg-white rounded-xl shadow-card p-4">
+            <div className="bg-white rounded-xl shadow p-4">
               <div className="text-xs text-gray-500 uppercase font-bold">
                 Total pagado
               </div>
@@ -301,9 +317,8 @@ export default function ConciliacionViaticos() {
             </div>
           </div>
 
-          {/* Viajes de la semana */}
-          <div className="bg-white rounded-xl shadow-card p-4 mb-6">
-            <h2 className="text-lg font-black text-teus-text-dark mb-3">
+          <div className="bg-white rounded-xl shadow p-4 mb-6">
+            <h2 className="text-lg font-black text-gray-900 mb-3">
               Viajes con camión propio ({viajes.length})
             </h2>
             {viajes.length === 0 ? (
@@ -313,7 +328,7 @@ export default function ConciliacionViaticos() {
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead className="bg-teus-bg-soft">
+                  <thead className="bg-gray-100">
                     <tr>
                       <th className="text-left p-2">Fecha</th>
                       <th className="text-left p-2">Equipo</th>
@@ -338,11 +353,11 @@ export default function ConciliacionViaticos() {
                         </td>
                       </tr>
                     ))}
-                    <tr className="border-t-2 border-teus-primary bg-teus-bg-soft font-black">
+                    <tr className="border-t-2 border-green-600 bg-gray-50 font-black">
                       <td colSpan={4} className="p-2 text-right">
                         TOTAL VIÁTICOS SEMANA
                       </td>
-                      <td className="p-2 text-right text-teus-primary">
+                      <td className="p-2 text-right text-green-700">
                         {fmtGs(totalGenerado)}
                       </td>
                     </tr>
@@ -352,16 +367,15 @@ export default function ConciliacionViaticos() {
             )}
           </div>
 
-          {/* Pagos */}
-          <div className="bg-white rounded-xl shadow-card p-4">
+          <div className="bg-white rounded-xl shadow p-4">
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-lg font-black text-teus-text-dark">
+              <h2 className="text-lg font-black text-gray-900">
                 Pagos de esta semana ({pagos.length})
               </h2>
               {!mostrarForm && (
                 <button
                   onClick={() => setMostrarForm(true)}
-                  className="bg-teus-primary text-white px-3 py-2 rounded-lg text-sm font-bold hover:opacity-90 flex items-center gap-1"
+                  className="bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg text-sm font-bold flex items-center gap-1"
                 >
                   <Plus className="w-4 h-4" />
                   Registrar pago
@@ -369,9 +383,8 @@ export default function ConciliacionViaticos() {
               )}
             </div>
 
-            {/* Form nuevo pago */}
             {mostrarForm && (
-              <div className="bg-teus-bg-soft rounded-lg p-4 mb-4 border border-teus-border-light">
+              <div className="bg-gray-50 rounded-lg p-4 mb-4 border border-gray-200">
                 <h3 className="font-bold text-sm mb-3">Nuevo pago</h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div>
@@ -413,7 +426,7 @@ export default function ConciliacionViaticos() {
                 <div className="flex gap-2 mt-3">
                   <button
                     onClick={registrarPago}
-                    className="bg-teus-primary text-white px-4 py-2 rounded-lg text-sm font-bold hover:opacity-90"
+                    className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-bold"
                   >
                     Guardar pago
                   </button>
@@ -438,7 +451,7 @@ export default function ConciliacionViaticos() {
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead className="bg-teus-bg-soft">
+                  <thead className="bg-gray-100">
                     <tr>
                       <th className="text-left p-2">Fecha pago</th>
                       <th className="text-left p-2">Notas</th>
