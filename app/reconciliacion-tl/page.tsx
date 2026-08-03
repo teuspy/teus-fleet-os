@@ -61,7 +61,7 @@ export default function ReconciliacionTLPage() {
         .order("fecha"),
       supabase.from("pagos_viatico")
         .select("*")
-        .gte("fecha_pago", startDate).lte("fecha_pago", endDate)
+        .gte("semana_inicio", startDate).lte("semana_inicio", endDate)
         .order("fecha_pago"),
     ]);
     setViajes((viajesRes.data as unknown as Viaje[]) || []);
