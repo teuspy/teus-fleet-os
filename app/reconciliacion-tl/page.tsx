@@ -113,6 +113,9 @@ export default function ReconciliacionTLPage() {
             Reconciliación con David (TL)
           </h1>
           <p className="text-sm text-teus-text_muted mt-1">Libro de contabilidad quincenal · Débitos / Créditos / Neteo automático</p>
+          <a href="/conciliacion-viaticos" className="inline-flex items-center gap-2 mt-3 bg-green-100 hover:bg-green-200 text-green-900 px-4 py-2 rounded-lg text-sm font-bold transition">
+            💵 Ir a Conciliación Viáticos Semanal (pagos parciales) →
+          </a>
         </div>
         <div className="flex items-center gap-3 bg-teus-card_light border border-teus-border_light rounded-xl px-4 py-2 shadow-card">
           <Calendar className="w-4 h-4 text-teus-accent" />
