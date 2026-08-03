@@ -77,7 +77,7 @@ export default function ReconciliacionTLPage() {
     const viajesConCamionTL = viajes.filter(v => v.vehiculo_externo_id === "TL");
     const totalFletesConTL = viajesConCamionTL.reduce((s, v) => s + (v.precio_flete || 0), 0);
     const totalComision = viajesConCamionTL.reduce((s, v) => s + (v.comision_recibida || 0), 0);
-    const debeFletesTL = totalFletesConTL - totalComision; // neto que debo a TL
+    const debeFletesTL = totalFletesConTL; // debo el flete completo, la comisión va al crédito
 
     return {
       totalCombustible, totalLitros, totalViatico, totalFletesConTL, totalComision, debeFletesTL,
@@ -187,7 +187,7 @@ export default function ReconciliacionTLPage() {
                   <div className="flex justify-between items-baseline">
                     <div>
                       <div className="text-xs uppercase font-bold text-red-700">🚛 Fletes con camión TL</div>
-                      <div className="text-[10px] text-red-600 mt-0.5">{debitos.viajesConCamionTL.length} viajes · menos 5% comisión</div>
+                      <div className="text-[10px] text-red-600 mt-0.5">{debitos.viajesConCamionTL.length} viajes · flete completo</div>
                     </div>
                     <div className="text-lg font-black text-red-900">{fmtGs(debitos.debeFletesTL)}</div>
                   </div>
