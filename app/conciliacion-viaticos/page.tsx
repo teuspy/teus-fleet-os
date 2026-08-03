@@ -229,6 +229,9 @@ export default function ConciliacionViaticos() {
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
+      <a href="/reconciliacion-tl" className="inline-flex items-center gap-1 text-sm text-gray-600 hover:text-gray-900 mb-3">
+        ← Volver a Reconciliación TL Quincenal
+      </a>
       <div className="flex items-center gap-3 mb-2">
         <Wallet className="w-8 h-8 text-green-700" />
         <h1 className="text-2xl font-black text-gray-900">
