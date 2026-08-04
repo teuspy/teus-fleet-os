@@ -30,6 +30,16 @@ type PagoViatico = {
   semana_inicio: string;
   notas: string | null;
 };
+type RecargaCombustible = {
+  id: string;
+  fecha: string;
+  vehiculo_id: string | null;
+  proveedor_id: string | null;
+  litros: number;
+  gs_por_litro: number;
+  monto_total: number;
+  observacion: string | null;
+};
 const MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 function fmtGs(n: number) {
   const sign = n < 0 ? "-" : "";
@@ -47,6 +57,7 @@ export default function ReconciliacionTLPage() {
   const [quincena, setQuincena] = useState<"1" | "2">(now.getDate() <= 15 ? "1" : "2");
   const [viajes, setViajes] = useState<Viaje[]>([]);
   const [pagosViatico, setPagosViatico] = useState<PagoViatico[]>([]);
+  const [recargasCombustible, setRecargasCombustible] = useState<RecargaCombustible[]>([]);
   const [loading, setLoading] = useState(true);
   async function loadData() {
     setLoading(true);
@@ -54,7 +65,7 @@ export default function ReconciliacionTLPage() {
     const endDay = quincena === "1" ? "15" : String(new Date(year, month, 0).getDate()).padStart(2, "0");
     const startDate = `${year}-${String(month).padStart(2, "0")}-${startDay}`;
     const endDate = `${year}-${String(month).padStart(2, "0")}-${endDay}`;
-    const [viajesRes, pagosRes] = await Promise.all([
+    const [viajesRes, pagosRes, recargasRes] = await Promise.all([
       supabase.from("viajes")
         .select("*, cliente:cliente_id(nombre), vehiculo:vehiculo_id(alias, chapa)")
         .gte("fecha", startDate).lte("fecha", endDate)
@@ -63,9 +74,14 @@ export default function ReconciliacionTLPage() {
         .select("*")
         .gte("semana_inicio", startDate).lte("semana_inicio", endDate)
         .order("fecha_pago"),
+      supabase.from("recargas_combustible")
+        .select("*")
+        .gte("fecha", startDate).lte("fecha", endDate)
+        .order("fecha"),
     ]);
     setViajes((viajesRes.data as unknown as Viaje[]) || []);
     setPagosViatico((pagosRes.data as unknown as PagoViatico[]) || []);
+    setRecargasCombustible((recargasRes.data as unknown as RecargaCombustible[]) || []);
     setLoading(false);
   }
   useEffect(() => { loadData(); }, [year, month, quincena]);
@@ -74,29 +90,33 @@ export default function ReconciliacionTLPage() {
     // Combustible y viático: SOLO de viajes con camión PROPIO (no externo)
     // Porque cuando uso camión de TL, David paga combustible/viático de su bolsillo (Opción A)
     const viajesConCamionPropio = viajes.filter(v => !v.vehiculo_externo_id);
-    const totalCombustible = viajesConCamionPropio.reduce((s, v) => s + (v.costo_combustible || 0), 0);
-    const totalLitros = viajesConCamionPropio.reduce((s, v) => s + (v.litros || 0), 0);
+    const combustibleViajes = viajesConCamionPropio.reduce((s, v) => s + (v.costo_combustible || 0), 0);
+    const litrosViajes = viajesConCamionPropio.reduce((s, v) => s + (v.litros || 0), 0);
+    // Recargas sueltas (fuera de viajes) - todas van a David (Opción A: sin filtro por proveedor)
+    const combustibleRecargas = recargasCombustible.reduce((s, r) => s + (r.monto_total || 0), 0);
+    const litrosRecargas = recargasCombustible.reduce((s, r) => s + (r.litros || 0), 0);
+    const totalCombustible = combustibleViajes + combustibleRecargas;
+    const totalLitros = litrosViajes + litrosRecargas;
     const totalViatico = viajesConCamionPropio.reduce((s, v) => s + (v.viatico || 0), 0);
     // Fletes con camión TL (le debo el flete completo)
     const viajesConCamionTL = viajes.filter(v => v.vehiculo_externo_id === "TL");
     const totalFletesConTL = viajesConCamionTL.reduce((s, v) => s + (v.precio_flete || 0), 0);
     const totalComision = viajesConCamionTL.reduce((s, v) => s + (v.comision_recibida || 0), 0);
-    const debeFletesTL = totalFletesConTL; // debo el flete completo, la comisión va al crédito
+    const debeFletesTL = totalFletesConTL;
     return {
-      totalCombustible, totalLitros, totalViatico, totalFletesConTL, totalComision, debeFletesTL,
+      totalCombustible, totalLitros, combustibleViajes, litrosViajes, combustibleRecargas, litrosRecargas,
+      totalViatico, totalFletesConTL, totalComision, debeFletesTL,
       viajesConCamionPropio, viajesConCamionTL,
       total: totalCombustible + totalViatico + debeFletesTL,
     };
-  }, [viajes]);
+  }, [viajes, recargasCombustible]);
   // ME DEBE DAVID (crédito)
   const creditos = useMemo(() => {
-    // Fletes hechos PARA TL (cliente contiene "T&L" y camión propio)
     const viajesParaTL = viajes.filter(v => 
       v.cliente?.nombre?.toUpperCase().includes("T&L") && !v.vehiculo_externo_id
     );
     const totalFletesParaTL = viajesParaTL.reduce((s, v) => s + (v.precio_flete || 0), 0);
     const totalComisionRecibida = debitos.totalComision;
-    // NUEVO: Pagos de viáticos hechos en efectivo (semanales) durante esta quincena
     const totalPagosViatico = pagosViatico.reduce((s, p) => s + (p.monto || 0), 0);
     return {
       viajesParaTL, totalFletesParaTL, totalComisionRecibida, totalPagosViatico,
@@ -131,14 +151,13 @@ export default function ReconciliacionTLPage() {
           </select>
         </div>
       </div>
-      {/* CUADRO DE REGLAS - CHEAT SHEET */}
       <div className="bg-yellow-50 border-2 border-yellow-300 rounded-xl p-4 mb-6">
         <div className="text-sm font-black text-yellow-900 mb-2">📖 REGLAS DEL LIBRO CON DAVID (memorizá esto)</div>
         <div className="grid grid-cols-2 gap-4 text-xs text-yellow-900">
           <div>
             <div className="font-bold mb-1">💸 YO LE DEBO A DAVID:</div>
             <ul className="space-y-0.5">
-              <li>⛽ Combustible que usé (litros × precio)</li>
+              <li>⛽ Combustible (viajes + recargas sueltas en la estación)</li>
               <li>💵 Viáticos que retiré (según ruta)</li>
               <li>🚛 Fletes con SUS camiones (flete completo)</li>
             </ul>
@@ -160,9 +179,7 @@ export default function ReconciliacionTLPage() {
         </div>
       ) : (
         <>
-          {/* TABLA DÉBITO / CRÉDITO */}
           <div className="grid grid-cols-2 gap-4 mb-6">
-            {/* DÉBITO */}
             <div className="bg-red-50 border-2 border-red-300 rounded-2xl p-5 shadow-card">
               <div className="flex items-center gap-2 mb-4">
                 <ArrowUpRight className="w-5 h-5 text-red-600" />
@@ -173,7 +190,7 @@ export default function ReconciliacionTLPage() {
                   <div className="flex justify-between items-baseline">
                     <div>
                       <div className="text-xs uppercase font-bold text-red-700">⛽ Combustible</div>
-                      <div className="text-[10px] text-red-600 mt-0.5">{debitos.totalLitros.toLocaleString("es-PY")} lts × precio del mes</div>
+                      <div className="text-[10px] text-red-600 mt-0.5">{debitos.totalLitros.toLocaleString("es-PY")} lts · {debitos.litrosViajes.toLocaleString("es-PY")} en viajes + {debitos.litrosRecargas.toLocaleString("es-PY")} en recargas</div>
                     </div>
                     <div className="text-lg font-black text-red-900">{fmtGs(debitos.totalCombustible)}</div>
                   </div>
@@ -202,7 +219,6 @@ export default function ReconciliacionTLPage() {
                 </div>
               </div>
             </div>
-            {/* CRÉDITO */}
             <div className="bg-green-50 border-2 border-green-300 rounded-2xl p-5 shadow-card">
               <div className="flex items-center gap-2 mb-4">
                 <ArrowDownLeft className="w-5 h-5 text-green-600" />
@@ -243,7 +259,6 @@ export default function ReconciliacionTLPage() {
               </div>
             </div>
           </div>
-          {/* NETEO FINAL */}
           <div className="bg-gradient-to-br from-teus-text_dark to-gray-900 text-white rounded-2xl p-6 shadow-2xl mb-6">
             <div className="text-xs uppercase tracking-widest opacity-70 mb-3">🎯 NETEO FINAL</div>
             <div className="grid grid-cols-3 gap-4 items-center">
@@ -263,7 +278,6 @@ export default function ReconciliacionTLPage() {
               </div>
             </div>
           </div>
-          {/* DETALLE VIAJES CON CAMIÓN PROPIO (para combustible/viático) */}
           <details className="bg-teus-card_light border border-teus-border_light rounded-xl mb-4 shadow-card">
             <summary className="cursor-pointer px-5 py-3 font-bold text-teus-text_dark hover:bg-teus-bg_soft">
               📋 Detalle: {debitos.viajesConCamionPropio.length} viajes con camión propio (para combustible/viático)
@@ -297,7 +311,37 @@ export default function ReconciliacionTLPage() {
               </table>
             </div>
           </details>
-          {/* DETALLE PAGOS DE VIÁTICOS EN EFECTIVO */}
+          {recargasCombustible.length > 0 && (
+            <details className="bg-teus-card_light border border-teus-border_light rounded-xl mb-4 shadow-card">
+              <summary className="cursor-pointer px-5 py-3 font-bold text-teus-text_dark hover:bg-teus-bg_soft">
+                ⛽ Detalle: {recargasCombustible.length} recargas de combustible sueltas (esta quincena)
+              </summary>
+              <div className="overflow-x-auto p-3">
+                <table className="w-full text-xs">
+                  <thead className="bg-teus-bg_soft">
+                    <tr>
+                      <th className="text-left p-2">Fecha</th>
+                      <th className="text-left p-2">Observación</th>
+                      <th className="text-right p-2">Litros</th>
+                      <th className="text-right p-2">Gs/L</th>
+                      <th className="text-right p-2">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {recargasCombustible.map(r => (
+                      <tr key={r.id} className="border-t border-teus-border_light">
+                        <td className="p-2">{fmtFecha(r.fecha)}</td>
+                        <td className="p-2">{r.observacion || "-"}</td>
+                        <td className="p-2 text-right">{r.litros}</td>
+                        <td className="p-2 text-right">{fmtGs(r.gs_por_litro)}</td>
+                        <td className="p-2 text-right font-bold text-red-600">{fmtGs(r.monto_total)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          )}
           {pagosViatico.length > 0 && (
             <details className="bg-teus-card_light border border-teus-border_light rounded-xl mb-4 shadow-card">
               <summary className="cursor-pointer px-5 py-3 font-bold text-teus-text_dark hover:bg-teus-bg_soft">
@@ -327,7 +371,6 @@ export default function ReconciliacionTLPage() {
               </div>
             </details>
           )}
-          {/* DETALLE FLETES PARA TL */}
           {creditos.viajesParaTL.length > 0 && (
             <details className="bg-teus-card_light border border-teus-border_light rounded-xl mb-4 shadow-card">
               <summary className="cursor-pointer px-5 py-3 font-bold text-teus-text_dark hover:bg-teus-bg_soft">
@@ -359,7 +402,6 @@ export default function ReconciliacionTLPage() {
               </div>
             </details>
           )}
-          {/* DETALLE FLETES CON CAMIÓN TL */}
           {debitos.viajesConCamionTL.length > 0 && (
             <details className="bg-teus-card_light border border-teus-border_light rounded-xl shadow-card">
               <summary className="cursor-pointer px-5 py-3 font-bold text-teus-text_dark hover:bg-teus-bg_soft">
