@@ -23,6 +23,7 @@ import {
   BarChart3,
   Medal,
   Wallet,
+  CheckSquare,
 } from "lucide-react";
 
 const navSections = [
@@ -67,6 +68,7 @@ const navSections = [
     title: "Sistema",
     items: [
       { href: "/reconciliacion-tl", label: "Reconciliación TL", icon: Wallet },
+      { href: "/cheques", label: "Cheques Emitidos", icon: CheckSquare },
       { href: "/gastos-fijos", label: "Gastos Fijos", icon: DollarSign },
       { href: "/alertas", label: "Alertas", icon: Bell },
       { href: "/configuracion", label: "Configuración", icon: Settings },
