@@ -391,9 +391,8 @@ function ViajeModal({
       chofer_externo_nombre: form.chofer_externo_nombre || null,
       precio_pagado_al_externo: form.precio_pagado_al_externo || 0,
       comision_recibida: form.comision_recibida || 0,
-            insumos_estacion_monto: form.insumos_estacion_monto || 0,
+      insumos_estacion_monto: form.insumos_estacion_monto || 0,
       insumos_estacion_detalle: form.insumos_estacion_detalle || null,
-      utilidad_bruta: utilidadBruta,
     };
     try {
       if (viaje) {
