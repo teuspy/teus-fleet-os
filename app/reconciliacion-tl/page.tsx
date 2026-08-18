@@ -100,7 +100,7 @@ export default function ReconciliacionTLPage() {
     const totalViatico = viajesConCamionPropio.reduce((s, v) => s + (v.viatico || 0), 0);
     // Fletes con camión TL (le debo el flete completo)
     const viajesConCamionTL = viajes.filter(v => v.vehiculo_externo_id === "TL");
-    const totalFletesConTL = viajesConCamionTL.reduce((s, v) => s + (v.precio_flete || 0), 0);
+    const totalFletesConTL = viajesConCamionTL.reduce((s, v) => s + (v.precio_pagado_al_externo || v.precio_flete || 0), 0);
     const totalComision = viajesConCamionTL.reduce((s, v) => s + (v.comision_recibida || 0), 0);
     const debeFletesTL = totalFletesConTL;
     return {
