@@ -1,5 +1,4 @@
 "use client";
-
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -7,13 +6,11 @@ import {
   Plus, Edit2, Trash2, X, ClipboardList, Search, Loader2,
   Calendar, TrendingUp, DollarSign, Truck, MapPin,
 } from "lucide-react";
-
 type Vehiculo = { id: string; nombre_equipo: string; tipo: string; chapa: string };
 type Chofer = { id: string; nombre_completo: string; vehiculo_asignado_id?: string | null };
 type Cliente = { id: string; nombre: string; credito_dias: number };
 type Ruta = { id: string; origen: string; destino: string; km_ida: number; km_vuelta: number; km_total: number };
 type Proveedor = { id: string; nombre: string; gs_por_litro: number | null };
-
 type Viaje = {
   id: string;
   fecha: string;
@@ -43,51 +40,42 @@ type Viaje = {
   chofer?: Chofer | null;
   cliente?: Cliente | null;
 };
-
 const MESES_ES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
-
 function fmtGs(n: number) {
  return "Gs. " + Math.round(n || 0).toLocaleString("es-PY");
 }
 function fmtGsShort(n: number) {
  return "Gs. " + Math.round(n || 0).toLocaleString("es-PY");
 }
-
 const ESTADOS: Record<string, { label: string; classes: string }> = {
   pendiente: { label: "Pendiente", classes: "bg-teus-warn-light text-teus-warn" },
   facturado: { label: "Facturado", classes: "bg-blue-50 text-blue-700" },
   cobrado: { label: "Cobrado", classes: "bg-teus-success-light text-teus-success" },
   cancelado: { label: "Cancelado", classes: "bg-teus-danger-light text-teus-danger" },
 };
-
 export default function ViajesPage() {
   const supabase = createClient();
   const searchParams = useSearchParams();
   const router = useRouter();
-
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
-
   const [viajes, setViajes] = useState<Viaje[]>([]);
   const [vehiculos, setVehiculos] = useState<Vehiculo[]>([]);
   const [choferes, setChoferes] = useState<Chofer[]>([]);
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [rutas, setRutas] = useState<Ruta[]>([]);
   const [proveedores, setProveedores] = useState<Proveedor[]>([]);
-
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Viaje | null>(null);
   const [search, setSearch] = useState("");
   const [filterEquipo, setFilterEquipo] = useState<string>("");
   const [filterEstado, setFilterEstado] = useState<string>("");
-
   async function loadData() {
     setLoading(true);
     const startDate = `${year}-${String(month).padStart(2, "0")}-01`;
     const endDate = new Date(year, month, 0).toISOString().split("T")[0];
-
     const [
       { data: viajesData },
       { data: vehData },
@@ -108,7 +96,6 @@ export default function ViajesPage() {
       supabase.from("rutas").select("*").eq("activa", true).order("origen"),
       supabase.from("proveedores").select("id, nombre, gs_por_litro").eq("tipo", "combustible").eq("activo", true).order("nombre"),
     ]);
-
     if (viajesData) setViajes(viajesData as Viaje[]);
     if (vehData) setVehiculos(vehData as Vehiculo[]);
     if (chofData) setChoferes(chofData as Chofer[]);
@@ -117,9 +104,7 @@ export default function ViajesPage() {
     if (provData) setProveedores(provData as Proveedor[]);
     setLoading(false);
   }
-
   useEffect(() => { loadData(); }, [year, month]);
-
   useEffect(() => {
     if (searchParams.get("new") === "1") {
       setEditing(null);
@@ -127,7 +112,6 @@ export default function ViajesPage() {
       router.replace("/viajes");
     }
   }, [searchParams, router]);
-
   const filtered = useMemo(() => viajes.filter(v => {
     if (filterEquipo && v.vehiculo_id !== filterEquipo) return false;
     if (filterEstado && v.estado !== filterEstado) return false;
@@ -138,7 +122,6 @@ export default function ViajesPage() {
     }
     return true;
   }), [viajes, filterEquipo, filterEstado, search]);
-
   const totales = useMemo(() => {
     const totalViajes = filtered.length;
     const facturacion = filtered.reduce((s, v) => s + (v.precio_flete || 0), 0);
@@ -146,13 +129,11 @@ export default function ViajesPage() {
     const kmTotal = filtered.reduce((s, v) => s + (v.km_viaje || 0), 0);
     return { totalViajes, facturacion, utilidadBruta, kmTotal };
   }, [filtered]);
-
   async function deleteViaje(v: Viaje) {
     if (!confirm(`¿Eliminar el viaje del ${v.fecha}?\n(${v.origen} → ${v.destino}, ${v.vehiculo?.nombre_equipo})\n\nEsta acción no se puede deshacer.`)) return;
     await supabase.from("viajes").delete().eq("id", v.id);
     loadData();
   }
-
   return (
     <div className="px-8 py-6 pb-16">
       <div className="flex items-center justify-between mb-6 animate-fade-in">
@@ -173,8 +154,6 @@ export default function ViajesPage() {
           Nuevo Viaje
         </button>
       </div>
-
-      {/* Selector mes/año */}
       <div className="bg-teus-card_light border border-teus-border_light rounded-xl p-4 mb-4 flex flex-wrap items-center gap-3 shadow-card">
         <div className="flex items-center gap-2 text-teus-text_muted text-sm font-bold">
           <Calendar className="w-4 h-4" />
@@ -186,7 +165,6 @@ export default function ViajesPage() {
         <select value={year} onChange={(e) => setYear(+e.target.value)} className="bg-white border border-teus-border_light rounded-lg px-3 py-2 text-sm text-teus-text_dark focus:outline-none focus:border-teus-accent focus:ring-2 focus:ring-teus-accent/20 font-semibold">
           {[2024,2025,2026,2027].map(y => <option key={y} value={y}>{y}</option>)}
         </select>
-
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-teus-text_soft" />
@@ -205,16 +183,12 @@ export default function ViajesPage() {
           </select>
         </div>
       </div>
-
-      {/* KPIs del período */}
       <div className="grid grid-cols-4 gap-4 mb-4">
         <KpiCard label="Viajes" value={totales.totalViajes.toString()} icon={ClipboardList} sub={`${MESES_ES[month-1]} ${year}`} />
         <KpiCard label="Facturación" value={fmtGsShort(totales.facturacion)} icon={DollarSign} sub={fmtGs(totales.facturacion)} />
         <KpiCard label="Utilidad Bruta" value={fmtGsShort(totales.utilidadBruta)} icon={TrendingUp} sub={`${totales.facturacion ? ((totales.utilidadBruta/totales.facturacion)*100).toFixed(1) : 0}% margen`} />
         <KpiCard label="Km recorridos" value={totales.kmTotal.toLocaleString("es-PY")} icon={MapPin} sub="Total del mes" />
       </div>
-
-      {/* Tabla */}
       <div className="bg-teus-card_light border border-teus-border_light rounded-xl overflow-hidden shadow-card">
         {loading ? (
           <div className="p-12 text-center text-teus-text_muted">
@@ -288,11 +262,9 @@ export default function ViajesPage() {
           </div>
         )}
       </div>
-
       <div className="text-xs text-teus-text_soft mt-4 px-1">
         Mostrando {filtered.length} viaje{filtered.length !== 1 ? "s" : ""} · {MESES_ES[month-1]} {year}
       </div>
-
       {showModal && (
         <ViajeModal
           viaje={editing}
@@ -308,7 +280,6 @@ export default function ViajesPage() {
     </div>
   );
 }
-
 function KpiCard({ label, value, icon: Icon, sub }: { label: string; value: string; icon: any; sub: string }) {
   return (
     <div className="bg-teus-card_light border border-teus-border_light rounded-2xl p-4 shadow-card hover:-translate-y-0.5 hover:shadow-card-hover transition-all">
@@ -323,7 +294,6 @@ function KpiCard({ label, value, icon: Icon, sub }: { label: string; value: stri
     </div>
   );
 }
-
 function ViajeModal({
   viaje, vehiculos, choferes, clientes, rutas, proveedores, onClose, onSaved,
 }: {
@@ -364,8 +334,6 @@ function ViajeModal({
   const [error, setError] = useState<string | null>(null);
   const [rutaSearch, setRutaSearch] = useState("");
   const [idaYVuelta, setIdaYVuelta] = useState(true);
-
-  // Auto: al elegir ruta, autocompleta origen/destino/km
   function onRutaChange(rutaId: string) {
     const r = rutas.find(x => x.id === rutaId);
     if (r) {
@@ -374,32 +342,25 @@ function ViajeModal({
       setForm(f => ({ ...f, ruta_id: rutaId }));
     }
   }
-
-  // Auto: al elegir vehículo, sugiere chofer asignado
   function onVehiculoChange(vehId: string) {
     const chof = choferes.find(c => c.vehiculo_asignado_id === vehId);
     setForm(f => ({ ...f, vehiculo_id: vehId, chofer_id: chof?.id || f.chofer_id }));
   }
-
-  // Auto: al elegir proveedor, autocompleta Gs/litro
   function onProveedorChange(provId: string) {
     const p = proveedores.find(x => x.id === provId);
     setForm(f => ({ ...f, proveedor_combustible_id: provId, gs_por_litro: p?.gs_por_litro || f.gs_por_litro }));
   }
-
   const costoCombustible = form.litros * form.gs_por_litro;
   const utilidadBruta = form.vehiculo_externo_id === "TL"
-    ? (form.comision_recibida || 0)
+    ? (form.precio_flete || 0) - (form.precio_pagado_al_externo || 0) + (form.comision_recibida || 0)
     : form.vehiculo_externo_id
       ? (form.precio_flete || 0) - (form.precio_pagado_al_externo || 0)
       : (form.precio_flete || 0) - costoCombustible - (form.viatico || 0) - (form.otros_costos || 0);
   const margenPct = form.precio_flete > 0 ? (utilidadBruta / form.precio_flete) * 100 : 0;
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
     setError(null);
-
     const payload: any = {
       fecha: form.fecha,
       vehiculo_id: form.vehiculo_id || null,
@@ -416,7 +377,7 @@ function ViajeModal({
       viatico: form.viatico || 0,
       precio_flete: form.precio_flete || 0,
      otros_costos: form.vehiculo_externo_id === "TL"
-        ? (form.precio_flete || 0) - (form.comision_recibida || 0)
+        ? (form.precio_pagado_al_externo || 0) - (form.comision_recibida || 0)
         : form.vehiculo_externo_id
           ? (form.precio_pagado_al_externo || 0)
           : (form.otros_costos || 0),
@@ -427,7 +388,6 @@ function ViajeModal({
       precio_pagado_al_externo: form.precio_pagado_al_externo || 0,
       comision_recibida: form.comision_recibida || 0,
     };
-
     try {
       if (viaje) {
         const { error } = await supabase.from("viajes").update(payload).eq("id", viaje.id);
@@ -443,10 +403,8 @@ function ViajeModal({
       setSaving(false);
     }
   }
-
   const inputCls = "w-full bg-white border border-teus-border_light rounded-lg px-3 py-2 mt-1 text-sm text-teus-text_dark focus:outline-none focus:border-teus-accent focus:ring-2 focus:ring-teus-accent/20";
   const labelCls = "text-xs font-bold text-teus-text_muted uppercase tracking-wider";
-
   return (
     <div className="fixed inset-0 bg-teus-text_dark/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
       <div className="bg-white border border-teus-border_light rounded-2xl w-full max-w-3xl shadow-2xl animate-slide-up max-h-[92vh] overflow-y-auto">
@@ -463,9 +421,7 @@ function ViajeModal({
             <X className="w-5 h-5" />
           </button>
         </div>
-
         <form onSubmit={handleSubmit} className="p-6 space-y-5">
-          {/* Fecha + Estado */}
           <div className="grid grid-cols-3 gap-4">
             <div>
               <label className={labelCls}>Fecha *</label>
@@ -485,8 +441,6 @@ function ViajeModal({
               <input type="text" value={form.nro_contenedor} onChange={(e) => setForm({ ...form, nro_contenedor: e.target.value.toUpperCase() })} placeholder="TCNU7842372" className={inputCls + " font-mono tracking-wider"} />
             </div>
           </div>
-
-          {/* Equipo + Chofer + Cliente */}
           <div className="grid grid-cols-3 gap-4">
             <div>
               <label className={labelCls}>Equipo (tracto) *</label>
@@ -510,15 +464,12 @@ function ViajeModal({
               </select>
             </div>
           </div>
-
-          {/* Ruta */}
           <div className="bg-teus-hover_light border border-teus-border_light rounded-xl p-4">
             <div className="flex items-center gap-2 mb-3">
               <MapPin className="w-4 h-4 text-teus-accent" />
               <div className="text-sm font-bold text-teus-text_dark">Ruta</div>
               <div className="text-[10px] text-teus-text_muted">(escribí para buscar destinos)</div>
             </div>
-
             <div className="mb-3">
               <input
                 type="text"
@@ -528,7 +479,6 @@ function ViajeModal({
                 className={inputCls}
               />
             </div>
-
             <div className="grid grid-cols-4 gap-3">
               <div className="col-span-4">
                 <label className={labelCls}>
@@ -568,7 +518,6 @@ function ViajeModal({
                   }
                 </select>
               </div>
-
               <div>
                 <label className={labelCls}>Origen *</label>
                 <input type="text" value={form.origen} onChange={(e) => setForm({ ...form, origen: e.target.value })} required placeholder="Villeta" className={inputCls} />
@@ -600,14 +549,12 @@ function ViajeModal({
                 </label>
               </div>
             </div>
-
             {form.ruta_id && (
               <div className="mt-3 text-xs text-teus-text_muted bg-white/50 rounded-lg px-3 py-2">
                 💡 {idaYVuelta ? "Cuenta km ida + vuelta al contador de mantenimiento" : "Solo cuenta km de ida"}. Podés editar el KM manualmente si tuviste desvío.
               </div>
             )}
           </div>
-          {/* Camión externo (TL, Elvio) */}
           <div className="bg-orange-50 border border-orange-200 rounded-xl p-4">
             <label className="flex items-center gap-2 cursor-pointer mb-3">
               <input type="checkbox" checked={!!form.vehiculo_externo_id}
@@ -628,8 +575,8 @@ function ViajeModal({
                   <select value={form.vehiculo_externo_id === "PENDIENTE" ? "" : form.vehiculo_externo_id}
                     onChange={(e) => {
                       const aliadoId = e.target.value;
-                      const flete = form.precio_flete || 0;
-                      setForm({ ...form, vehiculo_externo_id: aliadoId, comision_recibida: aliadoId === "TL" ? Math.round(flete * 0.05) : 0 });
+                      const pagado = form.precio_pagado_al_externo || 0;
+                      setForm({ ...form, vehiculo_externo_id: aliadoId, comision_recibida: aliadoId === "TL" ? Math.round(pagado * 0.05) : 0 });
                     }} required className={inputCls}>
                     <option value="">— Elegir —</option>
                     <option value="TL">TL (David) — Socio 5% comisión</option>
@@ -645,7 +592,11 @@ function ViajeModal({
                 <div>
                   <label className={labelCls}>Precio pagado al aliado (Gs)</label>
                   <input type="number" value={form.precio_pagado_al_externo || ""}
-                    onChange={(e) => setForm({ ...form, precio_pagado_al_externo: parseInt(e.target.value) || 0 })}
+                    onChange={(e) => {
+                      const nuevoPagado = parseInt(e.target.value) || 0;
+                      const nuevaComision = form.vehiculo_externo_id === "TL" ? Math.round(nuevoPagado * 0.05) : form.comision_recibida;
+                      setForm({ ...form, precio_pagado_al_externo: nuevoPagado, comision_recibida: nuevaComision });
+                    }}
                     className={inputCls} />
                 </div>
                 <div>
@@ -657,7 +608,6 @@ function ViajeModal({
               </div>
             )}
           </div>
-          {/* Combustible */}
           <div className="bg-teus-hover_light border border-teus-border_light rounded-xl p-4">
             <div className="flex items-center gap-2 mb-3">
               <div className="text-sm font-bold text-teus-text_dark">⛽ Combustible</div>
@@ -684,8 +634,6 @@ function ViajeModal({
               </div>
             </div>
           </div>
-
-          {/* Financiero */}
           <div className="bg-teus-hover_light border border-teus-border_light rounded-xl p-4">
             <div className="flex items-center gap-2 mb-3">
               <DollarSign className="w-4 h-4 text-teus-accent" />
@@ -696,8 +644,7 @@ function ViajeModal({
                 <label className={labelCls}>Precio flete (Gs.) *</label>
                 <input type="number" value={form.precio_flete || ""} onChange={(e) => {
                 const nuevoFlete = parseInt(e.target.value) || 0;
-                const nuevaComision = form.vehiculo_externo_id === "TL" ? Math.round(nuevoFlete * 0.05) : form.comision_recibida;
-                setForm({ ...form, precio_flete: nuevoFlete, comision_recibida: nuevaComision });
+                setForm({ ...form, precio_flete: nuevoFlete });
               }} required className={inputCls} />
                 <div className="text-[10px] text-teus-accent font-bold mt-1">{fmtGs(form.precio_flete)}</div>
               </div>
@@ -712,8 +659,6 @@ function ViajeModal({
                 <div className="text-[10px] text-teus-text_muted mt-1">{fmtGs(form.otros_costos)}</div>
               </div>
             </div>
-
-            {/* Resultado destacado */}
             <div className="mt-4 grid grid-cols-3 gap-3">
               <div className="bg-white border border-teus-border_light rounded-lg p-3">
                 <div className="text-[9px] uppercase tracking-wider text-teus-text_muted font-bold">Ingresos</div>
@@ -734,19 +679,15 @@ function ViajeModal({
               </div>
             </div>
           </div>
-
-          {/* Observación */}
           <div>
             <label className={labelCls}>Observaciones</label>
             <textarea value={form.observacion} onChange={(e) => setForm({ ...form, observacion: e.target.value })} rows={2} placeholder="Notas del viaje..." className={inputCls + " resize-none"} />
           </div>
-
           {error && (
             <div className="text-sm px-3 py-2 rounded-lg bg-teus-danger-light border border-teus-danger/30 text-teus-danger">
               {error}
             </div>
           )}
-
           <div className="flex gap-3 pt-2">
             <button type="button" onClick={onClose} className="flex-1 border border-teus-border_light text-teus-text_muted py-2.5 rounded-lg font-semibold text-sm hover:bg-teus-hover_light transition">
               Cancelar
