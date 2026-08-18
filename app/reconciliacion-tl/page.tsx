@@ -92,10 +92,12 @@ export default function ReconciliacionTLPage() {
     const viajesConCamionPropio = viajes.filter(v => !v.vehiculo_externo_id);
     const combustibleViajes = viajesConCamionPropio.reduce((s, v) => s + (v.costo_combustible || 0), 0);
     const litrosViajes = viajesConCamionPropio.reduce((s, v) => s + (v.litros || 0), 0);
-    // Recargas sueltas (fuera de viajes) - todas van a David (Opción A: sin filtro por proveedor)
+        // Recargas sueltas (fuera de viajes) - todas van a David (Opción A: sin filtro por proveedor)
     const combustibleRecargas = recargasCombustible.reduce((s, r) => s + (r.monto_total || 0), 0);
     const litrosRecargas = recargasCombustible.reduce((s, r) => s + (r.litros || 0), 0);
-    const totalCombustible = combustibleViajes + combustibleRecargas;
+    // Insumos extra comprados en la estación (aceite, refrigerante, etc.)
+    const totalInsumosEstacion = viajesConCamionPropio.reduce((s, v) => s + ((v as any).insumos_estacion_monto || 0), 0);
+    const totalCombustible = combustibleViajes + combustibleRecargas + totalInsumosEstacion;
     const totalLitros = litrosViajes + litrosRecargas;
     const totalViatico = viajesConCamionPropio.reduce((s, v) => s + (v.viatico || 0), 0);
     // Fletes con camión TL (le debo el flete completo)
