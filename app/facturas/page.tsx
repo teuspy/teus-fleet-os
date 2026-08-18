@@ -1,11 +1,8 @@
 "use client";
-
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Plus, Edit2, Trash2, X, FileText, Search, Loader2, Calendar, TrendingUp, DollarSign, AlertTriangle } from "lucide-react";
-
 type Cliente = { id: string; nombre: string; credito_dias: number };
-
 type Factura = {
   id: string;
   nro_factura: string;
@@ -19,9 +16,7 @@ type Factura = {
   observacion: string | null;
   cliente?: Cliente | null;
 };
-
 const MESES_ES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
-
 const ESTADOS: Record<string, { label: string; classes: string }> = {
   pagado: { label: "Pagado", classes: "bg-teus-success-light text-teus-success" },
   pendiente: { label: "Pendiente", classes: "bg-teus-warn-light text-teus-warn" },
@@ -29,24 +24,43 @@ const ESTADOS: Record<string, { label: string; classes: string }> = {
   vencida: { label: "Vencida", classes: "bg-teus-danger-light text-teus-danger" },
   anulada: { label: "Anulada", classes: "bg-gray-100 text-gray-500 line-through" },
 };
-
 function fmtGs(n: number) { return "Gs. " + Math.round(n || 0).toLocaleString("es-PY"); }
-function fmtGsShort(n: number) {
- return "Gs. " + Math.round(n || 0).toLocaleString("es-PY");
+function fmtGsShort(n: number) { return "Gs. " + Math.round(n || 0).toLocaleString("es-PY"); }
+// Helpers de fecha (evitan timezone drift Paraguay UTC-3)
+function parseFechaLocal(iso: string): Date {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, m - 1, d);
 }
-
+function toISODate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${dd}`;
+}
+function fmtFecha(iso: string | null): string {
+  if (!iso) return "—";
+  const [y, m, d] = iso.split("-");
+  return `${d}/${m}/${y.slice(2)}`;
+}
+function siguienteNumero(ultimo: string | null): string {
+  if (!ultimo) return "001-001-0000001";
+  const partes = ultimo.split("-");
+  if (partes.length !== 3) return "001-001-0000001";
+  const num = parseInt(partes[2]);
+  if (isNaN(num)) return "001-001-0000001";
+  return `${partes[0]}-${partes[1]}-${String(num + 1).padStart(partes[2].length, "0")}`;
+}
 function calcDiasVenc(fechaVenc: string | null): number | null {
   if (!fechaVenc) return null;
   const hoy = new Date(); hoy.setHours(0,0,0,0);
-  const v = new Date(fechaVenc);
+  const v = parseFechaLocal(fechaVenc);
   return Math.floor((v.getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24));
 }
-
 export default function FacturasPage() {
   const supabase = createClient();
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(0);  // 0 = todos
+  const [month, setMonth] = useState(0);
   const [facturas, setFacturas] = useState<Factura[]>([]);
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [loading, setLoading] = useState(true);
@@ -55,7 +69,6 @@ export default function FacturasPage() {
   const [search, setSearch] = useState("");
   const [filterCliente, setFilterCliente] = useState<string>("");
   const [filterEstado, setFilterEstado] = useState<string>("");
-
   async function loadData() {
     setLoading(true);
     let q = supabase.from("facturas").select("*, cliente:cliente_id(id, nombre, credito_dias)").order("fecha_emision", { ascending: false });
@@ -74,16 +87,13 @@ export default function FacturasPage() {
     if (cliData) setClientes(cliData as Cliente[]);
     setLoading(false);
   }
-
   useEffect(() => { loadData(); }, [year, month]);
-
   const filtered = useMemo(() => facturas.filter(f => {
     if (filterCliente && f.cliente_id !== filterCliente) return false;
     if (filterEstado && f.estado !== filterEstado) return false;
     if (search && !`${f.nro_factura} ${f.cliente?.nombre || ""}`.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   }), [facturas, filterCliente, filterEstado, search]);
-
   const totales = useMemo(() => {
     const total = filtered.reduce((s, f) => s + (f.estado !== "anulada" ? f.monto : 0), 0);
     const pagado = filtered.filter(f => f.estado === "pagado").reduce((s, f) => s + f.monto, 0);
@@ -94,19 +104,16 @@ export default function FacturasPage() {
     }).reduce((s, f) => s + f.monto, 0);
     return { total, pagado, pendiente, vencido, cantidad: filtered.length };
   }, [filtered]);
-
   async function deleteFactura(f: Factura) {
     if (!confirm(`¿Eliminar factura ${f.nro_factura}?\n\nEsta acción no se puede deshacer.`)) return;
     await supabase.from("facturas").delete().eq("id", f.id);
     loadData();
   }
-
   async function marcarPagado(f: Factura) {
     if (!confirm(`¿Marcar factura ${f.nro_factura} como PAGADA?`)) return;
-    await supabase.from("facturas").update({ estado: "pagado", fecha_cobro: new Date().toISOString().split("T")[0] }).eq("id", f.id);
+    await supabase.from("facturas").update({ estado: "pagado", fecha_cobro: toISODate(new Date()) }).eq("id", f.id);
     loadData();
   }
-
   return (
     <div className="px-8 py-6 pb-16">
       <div className="flex items-center justify-between mb-6 animate-fade-in">
@@ -121,7 +128,6 @@ export default function FacturasPage() {
           <Plus className="w-4 h-4" />Nueva Factura
         </button>
       </div>
-
       <div className="bg-teus-card_light border border-teus-border_light rounded-xl p-4 mb-4 flex flex-wrap items-center gap-3 shadow-card">
         <div className="flex items-center gap-2 text-teus-text_muted text-sm font-bold"><Calendar className="w-4 h-4" />Período:</div>
         <select value={month} onChange={(e) => setMonth(+e.target.value)} className="bg-white border border-teus-border_light rounded-lg px-3 py-2 text-sm text-teus-text_dark focus:outline-none focus:border-teus-accent focus:ring-2 focus:ring-teus-accent/20 font-semibold">
@@ -146,14 +152,12 @@ export default function FacturasPage() {
           </select>
         </div>
       </div>
-
       <div className="grid grid-cols-4 gap-3 mb-4">
         <KpiCard label="Facturado" value={fmtGsShort(totales.total)} sub={`${totales.cantidad} facturas`} color="text_dark" icon={FileText} />
         <KpiCard label="Cobrado" value={fmtGsShort(totales.pagado)} sub="Ya en la cuenta" color="success" icon={TrendingUp} />
         <KpiCard label="Por cobrar" value={fmtGsShort(totales.pendiente)} sub="Pendiente + crédito" color="warn" icon={DollarSign} />
         <KpiCard label="Vencidas" value={fmtGsShort(totales.vencido)} sub="¡Cobrar urgente!" color="danger" icon={AlertTriangle} />
       </div>
-
       <div className="bg-teus-card_light border border-teus-border_light rounded-xl overflow-hidden shadow-card">
         {loading ? (
           <div className="p-12 text-center text-teus-text_muted"><Loader2 className="w-8 h-8 animate-spin mx-auto mb-2 text-teus-accent" />Cargando...</div>
@@ -182,8 +186,8 @@ export default function FacturasPage() {
                     <tr key={f.id} className={`border-b border-teus-border_light/60 hover:bg-teus-hover_light transition ${vencidaAuto ? "bg-teus-danger-light/30" : ""}`}>
                       <td className="px-3 py-3 font-mono text-xs font-bold text-teus-text_dark">{f.nro_factura}</td>
                       <td className="px-3 py-3 text-xs text-teus-text_dark font-semibold">{f.cliente?.nombre || "—"}</td>
-                      <td className="px-3 py-3 text-xs text-teus-text_muted whitespace-nowrap">{new Date(f.fecha_emision).toLocaleDateString("es-PY", { day: "2-digit", month: "2-digit", year: "2-digit" })}</td>
-                      <td className="px-3 py-3 text-xs text-teus-text_muted whitespace-nowrap">{f.fecha_vencimiento ? new Date(f.fecha_vencimiento).toLocaleDateString("es-PY", { day: "2-digit", month: "2-digit", year: "2-digit" }) : "—"}</td>
+                      <td className="px-3 py-3 text-xs text-teus-text_muted whitespace-nowrap">{fmtFecha(f.fecha_emision)}</td>
+                      <td className="px-3 py-3 text-xs text-teus-text_muted whitespace-nowrap">{fmtFecha(f.fecha_vencimiento)}</td>
                       <td className="px-3 py-3 text-center">
                         {dias !== null && f.estado !== "pagado" && f.estado !== "anulada" ? (
                           <span className={`text-[10px] font-bold px-2 py-1 rounded ${dias < 0 ? "bg-teus-danger-light text-teus-danger" : dias < 7 ? "bg-teus-warn-light text-teus-warn" : "bg-teus-success-light text-teus-success"}`}>
@@ -214,14 +218,11 @@ export default function FacturasPage() {
           </div>
         )}
       </div>
-
       <div className="text-xs text-teus-text_soft mt-4 px-1">Mostrando {filtered.length} facturas · {month > 0 ? `${MESES_ES[month-1]} ${year}` : `Año ${year}`}</div>
-
       {showModal && <FacturaModal factura={editing} clientes={clientes} onClose={() => setShowModal(false)} onSaved={() => { setShowModal(false); loadData(); }} />}
     </div>
   );
 }
-
 function KpiCard({ label, value, sub, color, icon: Icon }: any) {
   const colorMap: Record<string, string> = {
     text_dark: "text-teus-text_dark", success: "text-teus-success", warn: "text-teus-warn", danger: "text-teus-danger"
@@ -240,7 +241,6 @@ function KpiCard({ label, value, sub, color, icon: Icon }: any) {
     </div>
   );
 }
-
 function FacturaModal({ factura, clientes, onClose, onSaved }: {
   factura: Factura | null; clientes: Cliente[]; onClose: () => void; onSaved: () => void;
 }) {
@@ -248,7 +248,7 @@ function FacturaModal({ factura, clientes, onClose, onSaved }: {
   const [form, setForm] = useState({
     nro_factura: factura?.nro_factura || "",
     cliente_id: factura?.cliente_id || "",
-    fecha_emision: factura?.fecha_emision || new Date().toISOString().split("T")[0],
+    fecha_emision: factura?.fecha_emision || toISODate(new Date()),
     monto: factura?.monto || 0,
     credito_dias: factura?.credito_dias ?? 15,
     fecha_vencimiento: factura?.fecha_vencimiento || "",
@@ -258,23 +258,36 @@ function FacturaModal({ factura, clientes, onClose, onSaved }: {
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // Auto calc vencimiento
+  // Auto-sugerir próximo N° factura al abrir "Nueva"
+  useEffect(() => {
+    if (!factura) {
+      async function fetchLast() {
+        const { data } = await supabase.from("facturas")
+          .select("nro_factura")
+          .order("nro_factura", { ascending: false })
+          .limit(1);
+        const ultimo = data && data[0] ? data[0].nro_factura : null;
+        setForm(prev => ({ ...prev, nro_factura: siguienteNumero(ultimo) }));
+      }
+      fetchLast();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   function updateEmision(fecha: string) {
     const nueva: any = { ...form, fecha_emision: fecha };
     if (form.credito_dias > 0 && fecha) {
-      const f = new Date(fecha);
+      const f = parseFechaLocal(fecha);
       f.setDate(f.getDate() + form.credito_dias);
-      nueva.fecha_vencimiento = f.toISOString().split("T")[0];
+      nueva.fecha_vencimiento = toISODate(f);
     }
     setForm(nueva);
   }
   function updateCredito(dias: number) {
     const nueva: any = { ...form, credito_dias: dias };
     if (dias > 0 && form.fecha_emision) {
-      const f = new Date(form.fecha_emision);
+      const f = parseFechaLocal(form.fecha_emision);
       f.setDate(f.getDate() + dias);
-      nueva.fecha_vencimiento = f.toISOString().split("T")[0];
+      nueva.fecha_vencimiento = toISODate(f);
     } else {
       nueva.fecha_vencimiento = "";
     }
@@ -286,14 +299,13 @@ function FacturaModal({ factura, clientes, onClose, onSaved }: {
     if (c) {
       nueva.credito_dias = c.credito_dias;
       if (form.fecha_emision && c.credito_dias > 0) {
-        const f = new Date(form.fecha_emision);
+        const f = parseFechaLocal(form.fecha_emision);
         f.setDate(f.getDate() + c.credito_dias);
-        nueva.fecha_vencimiento = f.toISOString().split("T")[0];
+        nueva.fecha_vencimiento = toISODate(f);
       }
     }
     setForm(nueva);
   }
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true); setError(null);
@@ -315,10 +327,8 @@ function FacturaModal({ factura, clientes, onClose, onSaved }: {
     } catch (err: any) { setError(err.message || "Error al guardar"); }
     finally { setSaving(false); }
   }
-
   const inputCls = "w-full bg-white border border-teus-border_light rounded-lg px-3 py-2 mt-1 text-sm text-teus-text_dark focus:outline-none focus:border-teus-accent focus:ring-2 focus:ring-teus-accent/20";
   const labelCls = "text-xs font-bold text-teus-text_muted uppercase tracking-wider";
-
   return (
     <div className="fixed inset-0 bg-teus-text_dark/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
       <div className="bg-white border border-teus-border_light rounded-2xl w-full max-w-2xl shadow-2xl animate-slide-up max-h-[92vh] overflow-y-auto">
@@ -330,7 +340,8 @@ function FacturaModal({ factura, clientes, onClose, onSaved }: {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className={labelCls}>N° Factura *</label>
-              <input type="text" value={form.nro_factura} onChange={(e) => setForm({ ...form, nro_factura: e.target.value })} required placeholder="0000123" className={inputCls + " font-mono"} />
+              <input type="text" value={form.nro_factura} onChange={(e) => setForm({ ...form, nro_factura: e.target.value })} required placeholder="001-001-0000001" className={inputCls + " font-mono"} />
+              {!factura && <div className="text-[10px] text-teus-accent font-bold mt-1">✨ Auto-sugerido (podés editarlo)</div>}
             </div>
             <div>
               <label className={labelCls}>Estado</label>
