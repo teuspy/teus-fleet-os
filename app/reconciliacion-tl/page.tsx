@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Wallet, Loader2, Calendar, ArrowUpRight, ArrowDownLeft } from "lucide-react";
+import { Wallet, Loader2, Calendar, ArrowUpRight, ArrowDownLeft, Download } from "lucide-react";
+import * as XLSX from "xlsx";
 type Viaje = {
   id: string;
   fecha: string;
@@ -19,6 +20,8 @@ type Viaje = {
   otros_costos: number;
   precio_pagado_al_externo: number;
   comision_recibida: number;
+  insumos_estacion_monto: number;
+  insumos_estacion_detalle: string | null;
   nro_contenedor: string | null;
   cliente?: { nombre: string } | null;
   vehiculo?: { alias: string | null; chapa: string } | null;
@@ -49,6 +52,10 @@ function fmtFecha(fechaStr: string) {
   const [, m, d] = fechaStr.split("T")[0].split("-");
   return `${d}/${m}`;
 }
+function fmtFechaFull(fechaStr: string) {
+  const [y, m, d] = fechaStr.split("T")[0].split("-");
+  return `${d}/${m}/${y}`;
+}
 export default function ReconciliacionTLPage() {
   const supabase = createClient();
   const now = new Date();
@@ -59,6 +66,7 @@ export default function ReconciliacionTLPage() {
   const [pagosViatico, setPagosViatico] = useState<PagoViatico[]>([]);
   const [recargasCombustible, setRecargasCombustible] = useState<RecargaCombustible[]>([]);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   async function loadData() {
     setLoading(true);
     const startDay = quincena === "1" ? "01" : "16";
@@ -85,34 +93,27 @@ export default function ReconciliacionTLPage() {
     setLoading(false);
   }
   useEffect(() => { loadData(); }, [year, month, quincena]);
-  // DEBO A DAVID (débito)
   const debitos = useMemo(() => {
-    // Combustible y viático: SOLO de viajes con camión PROPIO (no externo)
-    // Porque cuando uso camión de TL, David paga combustible/viático de su bolsillo (Opción A)
     const viajesConCamionPropio = viajes.filter(v => !v.vehiculo_externo_id);
     const combustibleViajes = viajesConCamionPropio.reduce((s, v) => s + (v.costo_combustible || 0), 0);
     const litrosViajes = viajesConCamionPropio.reduce((s, v) => s + (v.litros || 0), 0);
-        // Recargas sueltas (fuera de viajes) - todas van a David (Opción A: sin filtro por proveedor)
     const combustibleRecargas = recargasCombustible.reduce((s, r) => s + (r.monto_total || 0), 0);
     const litrosRecargas = recargasCombustible.reduce((s, r) => s + (r.litros || 0), 0);
-    // Insumos extra comprados en la estación (aceite, refrigerante, etc.)
-    const totalInsumosEstacion = viajesConCamionPropio.reduce((s, v) => s + ((v as any).insumos_estacion_monto || 0), 0);
+    const totalInsumosEstacion = viajesConCamionPropio.reduce((s, v) => s + (v.insumos_estacion_monto || 0), 0);
     const totalCombustible = combustibleViajes + combustibleRecargas + totalInsumosEstacion;
     const totalLitros = litrosViajes + litrosRecargas;
     const totalViatico = viajesConCamionPropio.reduce((s, v) => s + (v.viatico || 0), 0);
-    // Fletes con camión TL (le debo el flete completo)
     const viajesConCamionTL = viajes.filter(v => v.vehiculo_externo_id === "TL");
     const totalFletesConTL = viajesConCamionTL.reduce((s, v) => s + (v.precio_pagado_al_externo || v.precio_flete || 0), 0);
     const totalComision = viajesConCamionTL.reduce((s, v) => s + (v.comision_recibida || 0), 0);
     const debeFletesTL = totalFletesConTL;
     return {
-      totalCombustible, totalLitros, combustibleViajes, litrosViajes, combustibleRecargas, litrosRecargas,
+      totalCombustible, totalLitros, combustibleViajes, litrosViajes, combustibleRecargas, litrosRecargas, totalInsumosEstacion,
       totalViatico, totalFletesConTL, totalComision, debeFletesTL,
       viajesConCamionPropio, viajesConCamionTL,
       total: totalCombustible + totalViatico + debeFletesTL,
     };
   }, [viajes, recargasCombustible]);
-  // ME DEBE DAVID (crédito)
   const creditos = useMemo(() => {
     const viajesParaTL = viajes.filter(v => 
       v.cliente?.nombre?.toUpperCase().includes("T&L") && !v.vehiculo_externo_id
@@ -126,6 +127,229 @@ export default function ReconciliacionTLPage() {
     };
   }, [viajes, debitos, pagosViatico]);
   const neto = debitos.total - creditos.total;
+  async function exportarExcel(scope: "quincena" | "mes") {
+    setExporting(true);
+    try {
+      // Determinar rango de fechas según scope
+      let startDate: string, endDate: string, tituloRango: string;
+      if (scope === "quincena") {
+        const startDay = quincena === "1" ? "01" : "16";
+        const endDay = quincena === "1" ? "15" : String(new Date(year, month, 0).getDate()).padStart(2, "0");
+        startDate = `${year}-${String(month).padStart(2, "0")}-${startDay}`;
+        endDate = `${year}-${String(month).padStart(2, "0")}-${endDay}`;
+        tituloRango = `${MESES[month-1]} ${year} - ${quincena === "1" ? "1ra Q (1-15)" : "2da Q (16-fin)"}`;
+      } else {
+        startDate = `${year}-${String(month).padStart(2, "0")}-01`;
+        const lastDay = String(new Date(year, month, 0).getDate()).padStart(2, "0");
+        endDate = `${year}-${String(month).padStart(2, "0")}-${lastDay}`;
+        tituloRango = `${MESES[month-1]} ${year} - Mes completo`;
+      }
+      // Cargar datos del rango
+      const [viajesRes, pagosRes, recargasRes] = await Promise.all([
+        supabase.from("viajes")
+          .select("*, cliente:cliente_id(nombre), vehiculo:vehiculo_id(alias, chapa)")
+          .gte("fecha", startDate).lte("fecha", endDate)
+          .order("fecha"),
+        supabase.from("pagos_viatico")
+          .select("*")
+          .gte("semana_inicio", startDate).lte("semana_inicio", endDate)
+          .order("fecha_pago"),
+        supabase.from("recargas_combustible")
+          .select("*")
+          .gte("fecha", startDate).lte("fecha", endDate)
+          .order("fecha"),
+      ]);
+      const vs = (viajesRes.data as unknown as Viaje[]) || [];
+      const ps = (pagosRes.data as unknown as PagoViatico[]) || [];
+      const rs = (recargasRes.data as unknown as RecargaCombustible[]) || [];
+      // Recalcular con esos datos
+      const vsPropio = vs.filter(v => !v.vehiculo_externo_id);
+      const vsTL = vs.filter(v => v.vehiculo_externo_id === "TL");
+      const vsParaTL = vs.filter(v => v.cliente?.nombre?.toUpperCase().includes("T&L") && !v.vehiculo_externo_id);
+      const combViajes = vsPropio.reduce((s, v) => s + (v.costo_combustible || 0), 0);
+      const litrosV = vsPropio.reduce((s, v) => s + (v.litros || 0), 0);
+      const combRec = rs.reduce((s, r) => s + (r.monto_total || 0), 0);
+      const litrosR = rs.reduce((s, r) => s + (r.litros || 0), 0);
+      const insumos = vsPropio.reduce((s, v) => s + (v.insumos_estacion_monto || 0), 0);
+      const totalComb = combViajes + combRec + insumos;
+      const totalViat = vsPropio.reduce((s, v) => s + (v.viatico || 0), 0);
+      const totalFletesTL = vsTL.reduce((s, v) => s + (v.precio_pagado_al_externo || v.precio_flete || 0), 0);
+      const totalCom = vsTL.reduce((s, v) => s + (v.comision_recibida || 0), 0);
+      const totalFletesPara = vsParaTL.reduce((s, v) => s + (v.precio_flete || 0), 0);
+      const totalPagosViat = ps.reduce((s, p) => s + (p.monto || 0), 0);
+      const totalDebo = totalComb + totalViat + totalFletesTL;
+      const totalMeDebe = totalFletesPara + totalCom + totalPagosViat;
+      const netoFinal = totalDebo - totalMeDebe;
+      // Crear workbook
+      const wb = XLSX.utils.book_new();
+      // Hoja 1: RESUMEN
+      const resumen = [
+        ["RECONCILIACIÓN CON DAVID (TL)"],
+        [tituloRango],
+        [""],
+        ["YO LE DEBO A DAVID", "", "Monto (Gs.)"],
+        ["Combustible (viajes + recargas + insumos)", "", totalComb],
+        ["  · En viajes propios", `${litrosV} lts`, combViajes],
+        ["  · Recargas sueltas", `${litrosR} lts`, combRec],
+        ["  · Insumos extra estación", "", insumos],
+        ["Viáticos", "", totalViat],
+        ["Fletes con camión TL", `${vsTL.length} viajes`, totalFletesTL],
+        ["TOTAL DEBO", "", totalDebo],
+        [""],
+        ["DAVID ME DEBE", "", "Monto (Gs.)"],
+        ["Fletes hechos para TL", `${vsParaTL.length} viajes`, totalFletesPara],
+        ["Comisión 5%", "", totalCom],
+        ["Pagos viáticos en efectivo", `${ps.length} pagos`, totalPagosViat],
+        ["TOTAL ME DEBE", "", totalMeDebe],
+        [""],
+        ["NETEO FINAL", "", ""],
+        ["Debo a David", "", totalDebo],
+        ["(-) David me debe", "", totalMeDebe],
+        [netoFinal >= 0 ? "YO LE PAGO A DAVID" : "DAVID ME PAGA A MÍ", "", Math.abs(netoFinal)],
+      ];
+      const ws1 = XLSX.utils.aoa_to_sheet(resumen);
+      ws1["!cols"] = [{ wch: 40 }, { wch: 15 }, { wch: 18 }];
+      XLSX.utils.book_append_sheet(wb, ws1, "Resumen");
+      // Hoja 2: COMBUSTIBLE (viajes propios)
+      if (vsPropio.length > 0) {
+        const comb = [
+          ["Fecha", "Equipo", "Cliente", "Ruta", "Litros", "Gs/Litro", "Costo Total"],
+          ...vsPropio.map(v => [
+            fmtFechaFull(v.fecha),
+            v.vehiculo?.alias || "-",
+            v.cliente?.nombre || "-",
+            `${v.origen} → ${v.destino}`,
+            v.litros || 0,
+            v.gs_por_litro || 0,
+            v.costo_combustible || 0,
+          ]),
+          ["", "", "", "TOTAL", litrosV, "", combViajes],
+        ];
+        const ws = XLSX.utils.aoa_to_sheet(comb);
+        ws["!cols"] = [{ wch: 12 }, { wch: 14 }, { wch: 30 }, { wch: 30 }, { wch: 10 }, { wch: 12 }, { wch: 16 }];
+        XLSX.utils.book_append_sheet(wb, ws, "Combustible viajes");
+      }
+      // Hoja 3: RECARGAS SUELTAS
+      if (rs.length > 0) {
+        const rec = [
+          ["Fecha", "Litros", "Gs/Litro", "Total", "Observación"],
+          ...rs.map(r => [
+            fmtFechaFull(r.fecha),
+            r.litros || 0,
+            r.gs_por_litro || 0,
+            r.monto_total || 0,
+            r.observacion || "-",
+          ]),
+          ["TOTAL", litrosR, "", combRec, ""],
+        ];
+        const ws = XLSX.utils.aoa_to_sheet(rec);
+        ws["!cols"] = [{ wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 16 }, { wch: 40 }];
+        XLSX.utils.book_append_sheet(wb, ws, "Recargas sueltas");
+      }
+      // Hoja 4: VIÁTICOS
+      const vsConViatico = vsPropio.filter(v => (v.viatico || 0) > 0);
+      if (vsConViatico.length > 0) {
+        const via = [
+          ["Fecha", "Equipo", "Cliente", "Ruta", "Viático"],
+          ...vsConViatico.map(v => [
+            fmtFechaFull(v.fecha),
+            v.vehiculo?.alias || "-",
+            v.cliente?.nombre || "-",
+            `${v.origen} → ${v.destino}`,
+            v.viatico || 0,
+          ]),
+          ["", "", "", "TOTAL", totalViat],
+        ];
+        const ws = XLSX.utils.aoa_to_sheet(via);
+        ws["!cols"] = [{ wch: 12 }, { wch: 14 }, { wch: 30 }, { wch: 30 }, { wch: 16 }];
+        XLSX.utils.book_append_sheet(wb, ws, "Viáticos");
+      }
+      // Hoja 5: INSUMOS EXTRA
+      const vsConInsumos = vsPropio.filter(v => (v.insumos_estacion_monto || 0) > 0);
+      if (vsConInsumos.length > 0) {
+        const ins = [
+          ["Fecha", "Equipo", "Cliente", "Descripción", "Monto"],
+          ...vsConInsumos.map(v => [
+            fmtFechaFull(v.fecha),
+            v.vehiculo?.alias || "-",
+            v.cliente?.nombre || "-",
+            v.insumos_estacion_detalle || "-",
+            v.insumos_estacion_monto || 0,
+          ]),
+          ["", "", "", "TOTAL", insumos],
+        ];
+        const ws = XLSX.utils.aoa_to_sheet(ins);
+        ws["!cols"] = [{ wch: 12 }, { wch: 14 }, { wch: 30 }, { wch: 40 }, { wch: 16 }];
+        XLSX.utils.book_append_sheet(wb, ws, "Insumos extra");
+      }
+      // Hoja 6: FLETES CON CAMIÓN TL
+      if (vsTL.length > 0) {
+        const fle = [
+          ["Fecha", "Cliente", "Chofer TL", "Ruta", "Contenedor", "Flete pagado a David", "Comisión 5%", "Neto"],
+          ...vsTL.map(v => {
+            const pagado = v.precio_pagado_al_externo || v.precio_flete || 0;
+            const com = v.comision_recibida || 0;
+            return [
+              fmtFechaFull(v.fecha),
+              v.cliente?.nombre || "-",
+              v.chofer_externo_nombre || "-",
+              `${v.origen} → ${v.destino}`,
+              v.nro_contenedor || "-",
+              pagado,
+              com,
+              pagado - com,
+            ];
+          }),
+          ["", "", "", "", "TOTAL", totalFletesTL, totalCom, totalFletesTL - totalCom],
+        ];
+        const ws = XLSX.utils.aoa_to_sheet(fle);
+        ws["!cols"] = [{ wch: 12 }, { wch: 30 }, { wch: 18 }, { wch: 30 }, { wch: 16 }, { wch: 18 }, { wch: 14 }, { wch: 16 }];
+        XLSX.utils.book_append_sheet(wb, ws, "Fletes con camión TL");
+      }
+      // Hoja 7: FLETES PARA TL
+      if (vsParaTL.length > 0) {
+        const para = [
+          ["Fecha", "Equipo", "Chofer", "Contenedor", "Ruta", "Flete facturado"],
+          ...vsParaTL.map(v => [
+            fmtFechaFull(v.fecha),
+            v.vehiculo?.alias || "-",
+            "-",
+            v.nro_contenedor || "-",
+            `${v.origen} → ${v.destino}`,
+            v.precio_flete || 0,
+          ]),
+          ["", "", "", "", "TOTAL", totalFletesPara],
+        ];
+        const ws = XLSX.utils.aoa_to_sheet(para);
+        ws["!cols"] = [{ wch: 12 }, { wch: 14 }, { wch: 20 }, { wch: 16 }, { wch: 30 }, { wch: 16 }];
+        XLSX.utils.book_append_sheet(wb, ws, "Fletes para TL");
+      }
+      // Hoja 8: PAGOS VIÁTICOS EFECTIVO
+      if (ps.length > 0) {
+        const pag = [
+          ["Fecha pago", "Semana pagada (lunes)", "Notas", "Monto"],
+          ...ps.map(p => [
+            fmtFechaFull(p.fecha_pago),
+            fmtFechaFull(p.semana_inicio),
+            p.notas || "-",
+            p.monto || 0,
+          ]),
+          ["", "", "TOTAL", totalPagosViat],
+        ];
+        const ws = XLSX.utils.aoa_to_sheet(pag);
+        ws["!cols"] = [{ wch: 14 }, { wch: 22 }, { wch: 40 }, { wch: 16 }];
+        XLSX.utils.book_append_sheet(wb, ws, "Pagos viáticos efectivo");
+      }
+      // Descargar
+      const nombreScope = scope === "quincena" ? `Q${quincena}` : "Mes";
+      const nombreArchivo = `Reconciliacion-TL-${MESES[month-1]}-${year}-${nombreScope}.xlsx`;
+      XLSX.writeFile(wb, nombreArchivo);
+    } catch (err: any) {
+      alert("Error al exportar: " + (err.message || "desconocido"));
+    } finally {
+      setExporting(false);
+    }
+  }
   return (
     <div className="px-8 py-6 pb-16">
       <div className="flex items-center justify-between mb-6">
@@ -139,18 +363,38 @@ export default function ReconciliacionTLPage() {
             💵 Ir a Conciliación Viáticos Semanal (pagos parciales) →
           </a>
         </div>
-        <div className="flex items-center gap-3 bg-teus-card_light border border-teus-border_light rounded-xl px-4 py-2 shadow-card">
-          <Calendar className="w-4 h-4 text-teus-accent" />
-          <select value={month} onChange={(e) => setMonth(Number(e.target.value))} className="bg-white border rounded-lg px-3 py-1.5 text-sm font-semibold">
-            {MESES.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
-          </select>
-          <select value={year} onChange={(e) => setYear(Number(e.target.value))} className="bg-white border rounded-lg px-3 py-1.5 text-sm font-semibold">
-            {[2025, 2026, 2027].map(y => <option key={y} value={y}>{y}</option>)}
-          </select>
-          <select value={quincena} onChange={(e) => setQuincena(e.target.value as "1" | "2")} className="bg-white border rounded-lg px-3 py-1.5 text-sm font-semibold">
-            <option value="1">1ra Q (1-15)</option>
-            <option value="2">2da Q (16-fin)</option>
-          </select>
+        <div className="flex flex-col gap-2 items-end">
+          <div className="flex items-center gap-3 bg-teus-card_light border border-teus-border_light rounded-xl px-4 py-2 shadow-card">
+            <Calendar className="w-4 h-4 text-teus-accent" />
+            <select value={month} onChange={(e) => setMonth(Number(e.target.value))} className="bg-white border rounded-lg px-3 py-1.5 text-sm font-semibold">
+              {MESES.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
+            </select>
+            <select value={year} onChange={(e) => setYear(Number(e.target.value))} className="bg-white border rounded-lg px-3 py-1.5 text-sm font-semibold">
+              {[2025, 2026, 2027].map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+            <select value={quincena} onChange={(e) => setQuincena(e.target.value as "1" | "2")} className="bg-white border rounded-lg px-3 py-1.5 text-sm font-semibold">
+              <option value="1">1ra Q (1-15)</option>
+              <option value="2">2da Q (16-fin)</option>
+            </select>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => exportarExcel("quincena")}
+              disabled={exporting}
+              className="bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-1 disabled:opacity-50"
+            >
+              {exporting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+              Exportar Quincena
+            </button>
+            <button
+              onClick={() => exportarExcel("mes")}
+              disabled={exporting}
+              className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-1 disabled:opacity-50"
+            >
+              {exporting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+              Exportar Mes Completo
+            </button>
+          </div>
         </div>
       </div>
       <div className="bg-yellow-50 border-2 border-yellow-300 rounded-xl p-4 mb-6">
@@ -159,7 +403,7 @@ export default function ReconciliacionTLPage() {
           <div>
             <div className="font-bold mb-1">💸 YO LE DEBO A DAVID:</div>
             <ul className="space-y-0.5">
-              <li>⛽ Combustible (viajes + recargas sueltas en la estación)</li>
+              <li>⛽ Combustible (viajes + recargas sueltas + insumos)</li>
               <li>💵 Viáticos que retiré (según ruta)</li>
               <li>🚛 Fletes con SUS camiones (flete completo)</li>
             </ul>
@@ -192,7 +436,7 @@ export default function ReconciliacionTLPage() {
                   <div className="flex justify-between items-baseline">
                     <div>
                       <div className="text-xs uppercase font-bold text-red-700">⛽ Combustible</div>
-                      <div className="text-[10px] text-red-600 mt-0.5">{debitos.totalLitros.toLocaleString("es-PY")} lts · {debitos.litrosViajes.toLocaleString("es-PY")} en viajes + {debitos.litrosRecargas.toLocaleString("es-PY")} en recargas</div>
+                      <div className="text-[10px] text-red-600 mt-0.5">{debitos.totalLitros.toLocaleString("es-PY")} lts · {debitos.litrosViajes.toLocaleString("es-PY")} en viajes + {debitos.litrosRecargas.toLocaleString("es-PY")} en recargas{debitos.totalInsumosEstacion > 0 ? ` + ${fmtGs(debitos.totalInsumosEstacion)} en insumos` : ""}</div>
                     </div>
                     <div className="text-lg font-black text-red-900">{fmtGs(debitos.totalCombustible)}</div>
                   </div>
@@ -295,6 +539,7 @@ export default function ReconciliacionTLPage() {
                     <th className="text-right p-2">Litros</th>
                     <th className="text-right p-2">Combustible</th>
                     <th className="text-right p-2">Viático</th>
+                    <th className="text-right p-2">Insumos</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -307,6 +552,7 @@ export default function ReconciliacionTLPage() {
                       <td className="p-2 text-right">{v.litros}</td>
                       <td className="p-2 text-right text-red-600 font-bold">{fmtGs(v.costo_combustible)}</td>
                       <td className="p-2 text-right text-red-600 font-bold">{fmtGs(v.viatico)}</td>
+                      <td className="p-2 text-right text-red-600 font-bold">{fmtGs(v.insumos_estacion_monto || 0)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -417,23 +663,27 @@ export default function ReconciliacionTLPage() {
                       <th className="text-left p-2">Cliente</th>
                       <th className="text-left p-2">Chofer TL</th>
                       <th className="text-left p-2">Ruta</th>
-                      <th className="text-right p-2">Flete</th>
+                      <th className="text-right p-2">Flete pagado</th>
                       <th className="text-right p-2">Comisión 5%</th>
                       <th className="text-right p-2">Debo neto</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {debitos.viajesConCamionTL.map(v => (
-                      <tr key={v.id} className="border-t border-teus-border_light">
-                        <td className="p-2">{fmtFecha(v.fecha)}</td>
-                        <td className="p-2">{v.cliente?.nombre || "-"}</td>
-                        <td className="p-2">{v.chofer_externo_nombre || "-"}</td>
-                        <td className="p-2">{v.origen}→{v.destino}</td>
-                        <td className="p-2 text-right">{fmtGs(v.precio_flete)}</td>
-                        <td className="p-2 text-right text-green-600">{fmtGs(v.comision_recibida)}</td>
-                        <td className="p-2 text-right font-bold text-red-600">{fmtGs(v.precio_flete - v.comision_recibida)}</td>
-                      </tr>
-                    ))}
+                    {debitos.viajesConCamionTL.map(v => {
+                      const pagado = v.precio_pagado_al_externo || v.precio_flete || 0;
+                      const com = v.comision_recibida || 0;
+                      return (
+                        <tr key={v.id} className="border-t border-teus-border_light">
+                          <td className="p-2">{fmtFecha(v.fecha)}</td>
+                          <td className="p-2">{v.cliente?.nombre || "-"}</td>
+                          <td className="p-2">{v.chofer_externo_nombre || "-"}</td>
+                          <td className="p-2">{v.origen}→{v.destino}</td>
+                          <td className="p-2 text-right">{fmtGs(pagado)}</td>
+                          <td className="p-2 text-right text-green-600">{fmtGs(com)}</td>
+                          <td className="p-2 text-right font-bold text-red-600">{fmtGs(pagado - com)}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
