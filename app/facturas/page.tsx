@@ -219,7 +219,7 @@ export default function FacturasPage() {
         )}
       </div>
       <div className="text-xs text-teus-text_soft mt-4 px-1">Mostrando {filtered.length} facturas · {month > 0 ? `${MESES_ES[month-1]} ${year}` : `Año ${year}`}</div>
-      {showModal && <FacturaModal factura={editing} clientes={clientes} onClose={() => setShowModal(false)} onSaved={() => { setShowModal(false); loadData(); }} />}
+      {showModal && <FacturaModal factura={editing} clientes={clientes} facturas={facturas} onClose={() => setShowModal(false)} onSaved={() => { setShowModal(false); loadData(); }} />}
     </div>
   );
 }
@@ -241,8 +241,8 @@ function KpiCard({ label, value, sub, color, icon: Icon }: any) {
     </div>
   );
 }
-function FacturaModal({ factura, clientes, onClose, onSaved }: {
-  factura: Factura | null; clientes: Cliente[]; onClose: () => void; onSaved: () => void;
+function FacturaModal({ factura, clientes, facturas, onClose, onSaved }: {
+  factura: Factura | null; clientes: Cliente[]; facturas: Factura[]; onClose: () => void; onSaved: () => void;
 }) {
   const supabase = createClient();
   const [form, setForm] = useState({
@@ -261,15 +261,20 @@ function FacturaModal({ factura, clientes, onClose, onSaved }: {
   // Auto-sugerir próximo N° factura al abrir "Nueva"
   useEffect(() => {
     if (!factura) {
-      async function fetchLast() {
-        const { data } = await supabase.from("facturas")
-          .select("nro_factura")
-          .order("nro_factura", { ascending: false })
-          .limit(1);
-        const ultimo = data && data[0] ? data[0].nro_factura : null;
-        setForm(prev => ({ ...prev, nro_factura: siguienteNumero(ultimo) }));
+      // Busca el número más alto comparando la parte numérica (no alfabético)
+      let maxNum = 0;
+      let maxStr = "";
+      for (const f of facturas) {
+        const partes = f.nro_factura.split("-");
+        if (partes.length === 3) {
+          const num = parseInt(partes[2]);
+          if (!isNaN(num) && num > maxNum) {
+            maxNum = num;
+            maxStr = f.nro_factura;
+          }
+        }
       }
-      fetchLast();
+      setForm(prev => ({ ...prev, nro_factura: siguienteNumero(maxStr || null) }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
