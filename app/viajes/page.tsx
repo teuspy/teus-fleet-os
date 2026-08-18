@@ -36,6 +36,8 @@ type Viaje = {
   chofer_externo_nombre: string | null;
   precio_pagado_al_externo: number;
   comision_recibida: number;
+  insumos_estacion_monto: number;
+  insumos_estacion_detalle: string | null;
   vehiculo?: Vehiculo | null;
   chofer?: Chofer | null;
   cliente?: Cliente | null;
@@ -326,9 +328,11 @@ function ViajeModal({
     estado: viaje?.estado || "pendiente",
     observacion: viaje?.observacion || "",
     vehiculo_externo_id: viaje?.vehiculo_externo_id || "",
-      chofer_externo_nombre: viaje?.chofer_externo_nombre || "",
-      precio_pagado_al_externo: viaje?.precio_pagado_al_externo || 0,
-      comision_recibida: viaje?.comision_recibida || 0,
+    chofer_externo_nombre: viaje?.chofer_externo_nombre || "",
+    precio_pagado_al_externo: viaje?.precio_pagado_al_externo || 0,
+    comision_recibida: viaje?.comision_recibida || 0,
+    insumos_estacion_monto: viaje?.insumos_estacion_monto || 0,
+    insumos_estacion_detalle: viaje?.insumos_estacion_detalle || "",
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -352,10 +356,10 @@ function ViajeModal({
   }
   const costoCombustible = form.litros * form.gs_por_litro;
   const utilidadBruta = form.vehiculo_externo_id === "TL"
-    ? (form.precio_flete || 0) - (form.precio_pagado_al_externo || 0) + (form.comision_recibida || 0)
+    ? (form.precio_flete || 0) - (form.precio_pagado_al_externo || 0) + (form.comision_recibida || 0) - (form.insumos_estacion_monto || 0)
     : form.vehiculo_externo_id
-      ? (form.precio_flete || 0) - (form.precio_pagado_al_externo || 0)
-      : (form.precio_flete || 0) - costoCombustible - (form.viatico || 0) - (form.otros_costos || 0);
+      ? (form.precio_flete || 0) - (form.precio_pagado_al_externo || 0) - (form.insumos_estacion_monto || 0)
+      : (form.precio_flete || 0) - costoCombustible - (form.viatico || 0) - (form.otros_costos || 0) - (form.insumos_estacion_monto || 0);
   const margenPct = form.precio_flete > 0 ? (utilidadBruta / form.precio_flete) * 100 : 0;
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -387,6 +391,8 @@ function ViajeModal({
       chofer_externo_nombre: form.chofer_externo_nombre || null,
       precio_pagado_al_externo: form.precio_pagado_al_externo || 0,
       comision_recibida: form.comision_recibida || 0,
+      insumos_estacion_monto: form.insumos_estacion_monto || 0,
+      insumos_estacion_detalle: form.insumos_estacion_detalle || null,
     };
     try {
       if (viaje) {
@@ -636,6 +642,28 @@ function ViajeModal({
           </div>
           <div className="bg-teus-hover_light border border-teus-border_light rounded-xl p-4">
             <div className="flex items-center gap-2 mb-3">
+              <div className="text-sm font-bold text-teus-text_dark">🛢️ Insumos extra en la estación (opcional)</div>
+              <div className="text-[10px] text-teus-text_muted">(aceite, refrigerante, líquido de freno, agua destilada — se suma al débito con David)</div>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="col-span-2">
+                <label className={labelCls}>Descripción</label>
+                <input type="text" value={form.insumos_estacion_detalle || ""}
+                  onChange={(e) => setForm({ ...form, insumos_estacion_detalle: e.target.value })}
+                  placeholder="Ej: 2 lts aceite + 1 refrigerante"
+                  className={inputCls} />
+              </div>
+              <div>
+                <label className={labelCls}>Monto (Gs.)</label>
+                <input type="number" value={form.insumos_estacion_monto || ""}
+                  onChange={(e) => setForm({ ...form, insumos_estacion_monto: parseInt(e.target.value) || 0 })}
+                  className={inputCls} />
+                <div className="text-[10px] text-teus-text_muted mt-1">{fmtGs(form.insumos_estacion_monto || 0)}</div>
+              </div>
+            </div>
+          </div>
+          <div className="bg-teus-hover_light border border-teus-border_light rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-3">
               <DollarSign className="w-4 h-4 text-teus-accent" />
               <div className="text-sm font-bold text-teus-text_dark">Precios y utilidad</div>
             </div>
@@ -666,7 +694,7 @@ function ViajeModal({
               </div>
               <div className="bg-white border border-teus-border_light rounded-lg p-3">
                 <div className="text-[9px] uppercase tracking-wider text-teus-text_muted font-bold">Costos totales</div>
-                <div className="text-sm font-bold text-teus-danger mt-1">− {fmtGs(costoCombustible + form.viatico + form.otros_costos)}</div>
+                <div className="text-sm font-bold text-teus-danger mt-1">− {fmtGs(costoCombustible + form.viatico + form.otros_costos + (form.insumos_estacion_monto || 0))}</div>
               </div>
               <div className="teus-highlight-bg border rounded-lg p-3">
                 <div className="text-[9px] uppercase tracking-wider text-teus-accent font-black">Utilidad bruta</div>
