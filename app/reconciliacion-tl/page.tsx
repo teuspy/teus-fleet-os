@@ -22,6 +22,8 @@ type Viaje = {
   comision_recibida: number;
   insumos_estacion_monto: number;
   insumos_estacion_detalle: string | null;
+  ingresos_extras_monto: number;
+  ingresos_extras_detalle: string | null;
   nro_contenedor: string | null;
   cliente?: { nombre: string } | null;
   vehiculo?: { alias: string | null; chapa: string } | null;
@@ -107,11 +109,12 @@ export default function ReconciliacionTLPage() {
     const totalFletesConTL = viajesConCamionTL.reduce((s, v) => s + (v.precio_pagado_al_externo || v.precio_flete || 0), 0);
     const totalComision = viajesConCamionTL.reduce((s, v) => s + (v.comision_recibida || 0), 0);
     const debeFletesTL = totalFletesConTL;
+    const estadiasConCamionTL = viajesConCamionTL.reduce((s, v) => s + (v.ingresos_extras_monto || 0), 0);
     return {
       totalCombustible, totalLitros, combustibleViajes, litrosViajes, combustibleRecargas, litrosRecargas, totalInsumosEstacion,
-      totalViatico, totalFletesConTL, totalComision, debeFletesTL,
+      totalViatico, totalFletesConTL, totalComision, debeFletesTL, estadiasConCamionTL,
       viajesConCamionPropio, viajesConCamionTL,
-      total: totalCombustible + totalViatico + debeFletesTL,
+      total: totalCombustible + totalViatico + debeFletesTL + estadiasConCamionTL,
     };
   }, [viajes, recargasCombustible]);
   const creditos = useMemo(() => {
@@ -121,16 +124,16 @@ export default function ReconciliacionTLPage() {
     const totalFletesParaTL = viajesParaTL.reduce((s, v) => s + (v.precio_flete || 0), 0);
     const totalComisionRecibida = debitos.totalComision;
     const totalPagosViatico = pagosViatico.reduce((s, p) => s + (p.monto || 0), 0);
+    const estadiasParaTL = viajesParaTL.reduce((s, v) => s + (v.ingresos_extras_monto || 0), 0);
     return {
-      viajesParaTL, totalFletesParaTL, totalComisionRecibida, totalPagosViatico,
-      total: totalFletesParaTL + totalComisionRecibida + totalPagosViatico,
+      viajesParaTL, totalFletesParaTL, totalComisionRecibida, totalPagosViatico, estadiasParaTL,
+      total: totalFletesParaTL + totalComisionRecibida + totalPagosViatico + estadiasParaTL,
     };
   }, [viajes, debitos, pagosViatico]);
   const neto = debitos.total - creditos.total;
   async function exportarExcel(scope: "quincena" | "mes") {
     setExporting(true);
     try {
-      // Determinar rango de fechas según scope
       let startDate: string, endDate: string, tituloRango: string;
       if (scope === "quincena") {
         const startDay = quincena === "1" ? "01" : "16";
@@ -144,7 +147,6 @@ export default function ReconciliacionTLPage() {
         endDate = `${year}-${String(month).padStart(2, "0")}-${lastDay}`;
         tituloRango = `${MESES[month-1]} ${year} - Mes completo`;
       }
-      // Cargar datos del rango
       const [viajesRes, pagosRes, recargasRes] = await Promise.all([
         supabase.from("viajes")
           .select("*, cliente:cliente_id(nombre), vehiculo:vehiculo_id(alias, chapa)")
@@ -162,7 +164,6 @@ export default function ReconciliacionTLPage() {
       const vs = (viajesRes.data as unknown as Viaje[]) || [];
       const ps = (pagosRes.data as unknown as PagoViatico[]) || [];
       const rs = (recargasRes.data as unknown as RecargaCombustible[]) || [];
-      // Recalcular con esos datos
       const vsPropio = vs.filter(v => !v.vehiculo_externo_id);
       const vsTL = vs.filter(v => v.vehiculo_externo_id === "TL");
       const vsParaTL = vs.filter(v => v.cliente?.nombre?.toUpperCase().includes("T&L") && !v.vehiculo_externo_id);
@@ -175,14 +176,14 @@ export default function ReconciliacionTLPage() {
       const totalViat = vsPropio.reduce((s, v) => s + (v.viatico || 0), 0);
       const totalFletesTL = vsTL.reduce((s, v) => s + (v.precio_pagado_al_externo || v.precio_flete || 0), 0);
       const totalCom = vsTL.reduce((s, v) => s + (v.comision_recibida || 0), 0);
+      const estadiasTL = vsTL.reduce((s, v) => s + (v.ingresos_extras_monto || 0), 0);
       const totalFletesPara = vsParaTL.reduce((s, v) => s + (v.precio_flete || 0), 0);
+      const estadiasPara = vsParaTL.reduce((s, v) => s + (v.ingresos_extras_monto || 0), 0);
       const totalPagosViat = ps.reduce((s, p) => s + (p.monto || 0), 0);
-      const totalDebo = totalComb + totalViat + totalFletesTL;
-      const totalMeDebe = totalFletesPara + totalCom + totalPagosViat;
+      const totalDebo = totalComb + totalViat + totalFletesTL + estadiasTL;
+      const totalMeDebe = totalFletesPara + totalCom + totalPagosViat + estadiasPara;
       const netoFinal = totalDebo - totalMeDebe;
-      // Crear workbook
       const wb = XLSX.utils.book_new();
-      // Hoja 1: RESUMEN
       const resumen = [
         ["RECONCILIACIÓN CON DAVID (TL)"],
         [tituloRango],
@@ -194,12 +195,14 @@ export default function ReconciliacionTLPage() {
         ["  · Insumos extra estación", "", insumos],
         ["Viáticos", "", totalViat],
         ["Fletes con camión TL", `${vsTL.length} viajes`, totalFletesTL],
+        ["Estadías con camión TL (100%)", "", estadiasTL],
         ["TOTAL DEBO", "", totalDebo],
         [""],
         ["DAVID ME DEBE", "", "Monto (Gs.)"],
         ["Fletes hechos para TL", `${vsParaTL.length} viajes`, totalFletesPara],
         ["Comisión 5%", "", totalCom],
         ["Pagos viáticos en efectivo", `${ps.length} pagos`, totalPagosViat],
+        ["Estadías cobradas a TL (100%)", "", estadiasPara],
         ["TOTAL ME DEBE", "", totalMeDebe],
         [""],
         ["NETEO FINAL", "", ""],
@@ -210,7 +213,6 @@ export default function ReconciliacionTLPage() {
       const ws1 = XLSX.utils.aoa_to_sheet(resumen);
       ws1["!cols"] = [{ wch: 40 }, { wch: 15 }, { wch: 18 }];
       XLSX.utils.book_append_sheet(wb, ws1, "Resumen");
-      // Hoja 2: COMBUSTIBLE (viajes propios)
       if (vsPropio.length > 0) {
         const comb = [
           ["Fecha", "Equipo", "Cliente", "Ruta", "Litros", "Gs/Litro", "Costo Total"],
@@ -229,7 +231,6 @@ export default function ReconciliacionTLPage() {
         ws["!cols"] = [{ wch: 12 }, { wch: 14 }, { wch: 30 }, { wch: 30 }, { wch: 10 }, { wch: 12 }, { wch: 16 }];
         XLSX.utils.book_append_sheet(wb, ws, "Combustible viajes");
       }
-      // Hoja 3: RECARGAS SUELTAS
       if (rs.length > 0) {
         const rec = [
           ["Fecha", "Litros", "Gs/Litro", "Total", "Observación"],
@@ -246,7 +247,6 @@ export default function ReconciliacionTLPage() {
         ws["!cols"] = [{ wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 16 }, { wch: 40 }];
         XLSX.utils.book_append_sheet(wb, ws, "Recargas sueltas");
       }
-      // Hoja 4: VIÁTICOS
       const vsConViatico = vsPropio.filter(v => (v.viatico || 0) > 0);
       if (vsConViatico.length > 0) {
         const via = [
@@ -264,7 +264,6 @@ export default function ReconciliacionTLPage() {
         ws["!cols"] = [{ wch: 12 }, { wch: 14 }, { wch: 30 }, { wch: 30 }, { wch: 16 }];
         XLSX.utils.book_append_sheet(wb, ws, "Viáticos");
       }
-      // Hoja 5: INSUMOS EXTRA
       const vsConInsumos = vsPropio.filter(v => (v.insumos_estacion_monto || 0) > 0);
       if (vsConInsumos.length > 0) {
         const ins = [
@@ -282,13 +281,13 @@ export default function ReconciliacionTLPage() {
         ws["!cols"] = [{ wch: 12 }, { wch: 14 }, { wch: 30 }, { wch: 40 }, { wch: 16 }];
         XLSX.utils.book_append_sheet(wb, ws, "Insumos extra");
       }
-      // Hoja 6: FLETES CON CAMIÓN TL
       if (vsTL.length > 0) {
         const fle = [
-          ["Fecha", "Cliente", "Chofer TL", "Ruta", "Contenedor", "Flete pagado a David", "Comisión 5%", "Neto"],
+          ["Fecha", "Cliente", "Chofer TL", "Ruta", "Contenedor", "Flete pagado a David", "Comisión 5%", "Estadía", "Neto"],
           ...vsTL.map(v => {
             const pagado = v.precio_pagado_al_externo || v.precio_flete || 0;
             const com = v.comision_recibida || 0;
+            const est = v.ingresos_extras_monto || 0;
             return [
               fmtFechaFull(v.fecha),
               v.cliente?.nombre || "-",
@@ -297,19 +296,19 @@ export default function ReconciliacionTLPage() {
               v.nro_contenedor || "-",
               pagado,
               com,
-              pagado - com,
+              est,
+              pagado - com + est,
             ];
           }),
-          ["", "", "", "", "TOTAL", totalFletesTL, totalCom, totalFletesTL - totalCom],
+          ["", "", "", "", "TOTAL", totalFletesTL, totalCom, estadiasTL, totalFletesTL - totalCom + estadiasTL],
         ];
         const ws = XLSX.utils.aoa_to_sheet(fle);
-        ws["!cols"] = [{ wch: 12 }, { wch: 30 }, { wch: 18 }, { wch: 30 }, { wch: 16 }, { wch: 18 }, { wch: 14 }, { wch: 16 }];
+        ws["!cols"] = [{ wch: 12 }, { wch: 30 }, { wch: 18 }, { wch: 30 }, { wch: 16 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 16 }];
         XLSX.utils.book_append_sheet(wb, ws, "Fletes con camión TL");
       }
-      // Hoja 7: FLETES PARA TL
       if (vsParaTL.length > 0) {
         const para = [
-          ["Fecha", "Equipo", "Chofer", "Contenedor", "Ruta", "Flete facturado"],
+          ["Fecha", "Equipo", "Chofer", "Contenedor", "Ruta", "Flete facturado", "Estadía"],
           ...vsParaTL.map(v => [
             fmtFechaFull(v.fecha),
             v.vehiculo?.alias || "-",
@@ -317,14 +316,14 @@ export default function ReconciliacionTLPage() {
             v.nro_contenedor || "-",
             `${v.origen} → ${v.destino}`,
             v.precio_flete || 0,
+            v.ingresos_extras_monto || 0,
           ]),
-          ["", "", "", "", "TOTAL", totalFletesPara],
+          ["", "", "", "", "TOTAL", totalFletesPara, estadiasPara],
         ];
         const ws = XLSX.utils.aoa_to_sheet(para);
-        ws["!cols"] = [{ wch: 12 }, { wch: 14 }, { wch: 20 }, { wch: 16 }, { wch: 30 }, { wch: 16 }];
+        ws["!cols"] = [{ wch: 12 }, { wch: 14 }, { wch: 20 }, { wch: 16 }, { wch: 30 }, { wch: 16 }, { wch: 14 }];
         XLSX.utils.book_append_sheet(wb, ws, "Fletes para TL");
       }
-      // Hoja 8: PAGOS VIÁTICOS EFECTIVO
       if (ps.length > 0) {
         const pag = [
           ["Fecha pago", "Semana pagada (lunes)", "Notas", "Monto"],
@@ -340,7 +339,6 @@ export default function ReconciliacionTLPage() {
         ws["!cols"] = [{ wch: 14 }, { wch: 22 }, { wch: 40 }, { wch: 16 }];
         XLSX.utils.book_append_sheet(wb, ws, "Pagos viáticos efectivo");
       }
-      // Descargar
       const nombreScope = scope === "quincena" ? `Q${quincena}` : "Mes";
       const nombreArchivo = `Reconciliacion-TL-${MESES[month-1]}-${year}-${nombreScope}.xlsx`;
       XLSX.writeFile(wb, nombreArchivo);
@@ -406,6 +404,7 @@ export default function ReconciliacionTLPage() {
               <li>⛽ Combustible (viajes + recargas sueltas + insumos)</li>
               <li>💵 Viáticos que retiré (según ruta)</li>
               <li>🚛 Fletes con SUS camiones (flete completo)</li>
+              <li>🕐 Estadías con SUS camiones (100%, sin comisión)</li>
             </ul>
           </div>
           <div>
@@ -414,6 +413,7 @@ export default function ReconciliacionTLPage() {
               <li>🚛 Fletes que hice PARA él (con mis camiones)</li>
               <li>💰 5% de comisión sobre fletes con SUS camiones</li>
               <li>💵 Pagos viáticos que le hice en efectivo (semanales)</li>
+              <li>🕐 Estadías cobradas a TL (con mis camiones, 100%)</li>
             </ul>
           </div>
         </div>
@@ -459,6 +459,17 @@ export default function ReconciliacionTLPage() {
                     <div className="text-lg font-black text-red-900">{fmtGs(debitos.debeFletesTL)}</div>
                   </div>
                 </div>
+                {debitos.estadiasConCamionTL > 0 && (
+                  <div className="bg-white rounded-lg p-3 border border-red-200">
+                    <div className="flex justify-between items-baseline">
+                      <div>
+                        <div className="text-xs uppercase font-bold text-red-700">🕐 Estadías con camión TL</div>
+                        <div className="text-[10px] text-red-600 mt-0.5">le paso al 100% lo que cobré al cliente</div>
+                      </div>
+                      <div className="text-lg font-black text-red-900">{fmtGs(debitos.estadiasConCamionTL)}</div>
+                    </div>
+                  </div>
+                )}
                 <div className="bg-red-600 text-white rounded-lg p-4 mt-4">
                   <div className="text-xs uppercase font-bold opacity-90">TOTAL DEBO</div>
                   <div className="text-3xl font-black">{fmtGs(debitos.total)}</div>
@@ -498,6 +509,17 @@ export default function ReconciliacionTLPage() {
                     <div className="text-lg font-black text-green-900">{fmtGs(creditos.totalPagosViatico)}</div>
                   </div>
                 </div>
+                {creditos.estadiasParaTL > 0 && (
+                  <div className="bg-white rounded-lg p-3 border border-green-200">
+                    <div className="flex justify-between items-baseline">
+                      <div>
+                        <div className="text-xs uppercase font-bold text-green-700">🕐 Estadías cobradas a TL</div>
+                        <div className="text-[10px] text-green-600 mt-0.5">le facturo al 100% las estadías con mis camiones</div>
+                      </div>
+                      <div className="text-lg font-black text-green-900">{fmtGs(creditos.estadiasParaTL)}</div>
+                    </div>
+                  </div>
+                )}
                 <div className="bg-green-600 text-white rounded-lg p-4 mt-4">
                   <div className="text-xs uppercase font-bold opacity-90">TOTAL ME DEBE</div>
                   <div className="text-3xl font-black">{fmtGs(creditos.total)}</div>
@@ -633,6 +655,7 @@ export default function ReconciliacionTLPage() {
                       <th className="text-left p-2">Ruta</th>
                       <th className="text-left p-2">Equipo</th>
                       <th className="text-right p-2">Flete</th>
+                      <th className="text-right p-2">Estadía</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -643,6 +666,7 @@ export default function ReconciliacionTLPage() {
                         <td className="p-2">{v.origen}→{v.destino}</td>
                         <td className="p-2">{v.vehiculo?.alias || "-"}</td>
                         <td className="p-2 text-right font-bold text-green-600">{fmtGs(v.precio_flete)}</td>
+                        <td className="p-2 text-right font-bold text-green-600">{fmtGs(v.ingresos_extras_monto || 0)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -665,6 +689,7 @@ export default function ReconciliacionTLPage() {
                       <th className="text-left p-2">Ruta</th>
                       <th className="text-right p-2">Flete pagado</th>
                       <th className="text-right p-2">Comisión 5%</th>
+                      <th className="text-right p-2">Estadía</th>
                       <th className="text-right p-2">Debo neto</th>
                     </tr>
                   </thead>
@@ -672,6 +697,7 @@ export default function ReconciliacionTLPage() {
                     {debitos.viajesConCamionTL.map(v => {
                       const pagado = v.precio_pagado_al_externo || v.precio_flete || 0;
                       const com = v.comision_recibida || 0;
+                      const est = v.ingresos_extras_monto || 0;
                       return (
                         <tr key={v.id} className="border-t border-teus-border_light">
                           <td className="p-2">{fmtFecha(v.fecha)}</td>
@@ -680,7 +706,8 @@ export default function ReconciliacionTLPage() {
                           <td className="p-2">{v.origen}→{v.destino}</td>
                           <td className="p-2 text-right">{fmtGs(pagado)}</td>
                           <td className="p-2 text-right text-green-600">{fmtGs(com)}</td>
-                          <td className="p-2 text-right font-bold text-red-600">{fmtGs(pagado - com)}</td>
+                          <td className="p-2 text-right text-red-600">{fmtGs(est)}</td>
+                          <td className="p-2 text-right font-bold text-red-600">{fmtGs(pagado - com + est)}</td>
                         </tr>
                       );
                     })}
