@@ -38,6 +38,8 @@ type Viaje = {
   comision_recibida: number;
   insumos_estacion_monto: number;
   insumos_estacion_detalle: string | null;
+  ingresos_extras_monto: number;
+  ingresos_extras_detalle: string | null;
   vehiculo?: Vehiculo | null;
   chofer?: Chofer | null;
   cliente?: Cliente | null;
@@ -126,7 +128,7 @@ export default function ViajesPage() {
   }), [viajes, filterEquipo, filterEstado, search]);
   const totales = useMemo(() => {
     const totalViajes = filtered.length;
-    const facturacion = filtered.reduce((s, v) => s + (v.precio_flete || 0), 0);
+    const facturacion = filtered.reduce((s, v) => s + (v.precio_flete || 0) + (v.ingresos_extras_monto || 0), 0);
     const utilidadBruta = filtered.reduce((s, v) => s + (v.utilidad_bruta || 0), 0);
     const kmTotal = filtered.reduce((s, v) => s + (v.km_viaje || 0), 0);
     return { totalViajes, facturacion, utilidadBruta, kmTotal };
@@ -244,7 +246,12 @@ export default function ViajesPage() {
                       {v.km_viaje ? <span className="ml-2 text-teus-accent font-bold">{v.km_viaje}km</span> : null}
                     </td>
                     <td className="px-3 py-3 font-mono text-[10px] text-teus-text_muted">{v.nro_contenedor || "—"}</td>
-                    <td className="px-3 py-3 text-right font-semibold text-teus-text_dark whitespace-nowrap">{fmtGsShort(v.precio_flete)}</td>
+                    <td className="px-3 py-3 text-right font-semibold text-teus-text_dark whitespace-nowrap">
+                      {fmtGsShort(v.precio_flete)}
+                      {(v.ingresos_extras_monto || 0) > 0 && (
+                        <div className="text-[9px] text-blue-600 font-bold">+{fmtGsShort(v.ingresos_extras_monto)} extra</div>
+                      )}
+                    </td>
                     <td className="px-3 py-3 text-right font-bold text-teus-accent whitespace-nowrap">{fmtGsShort(v.utilidad_bruta)}</td>
                     <td className="px-3 py-3">
                       <span className={`inline-flex items-center text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded ${ESTADOS[v.estado]?.classes || ""}`}>
@@ -333,6 +340,8 @@ function ViajeModal({
     comision_recibida: viaje?.comision_recibida || 0,
     insumos_estacion_monto: viaje?.insumos_estacion_monto || 0,
     insumos_estacion_detalle: viaje?.insumos_estacion_detalle || "",
+    ingresos_extras_monto: viaje?.ingresos_extras_monto || 0,
+    ingresos_extras_detalle: viaje?.ingresos_extras_detalle || "",
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -356,11 +365,12 @@ function ViajeModal({
   }
   const costoCombustible = form.litros * form.gs_por_litro;
   const utilidadBruta = form.vehiculo_externo_id === "TL"
-    ? (form.precio_flete || 0) - (form.precio_pagado_al_externo || 0) + (form.comision_recibida || 0) - (form.insumos_estacion_monto || 0)
+    ? (form.precio_flete || 0) - (form.precio_pagado_al_externo || 0) + (form.comision_recibida || 0) - (form.insumos_estacion_monto || 0) + (form.ingresos_extras_monto || 0)
     : form.vehiculo_externo_id
-      ? (form.precio_flete || 0) - (form.precio_pagado_al_externo || 0) - (form.insumos_estacion_monto || 0)
-      : (form.precio_flete || 0) - costoCombustible - (form.viatico || 0) - (form.otros_costos || 0) - (form.insumos_estacion_monto || 0);
-  const margenPct = form.precio_flete > 0 ? (utilidadBruta / form.precio_flete) * 100 : 0;
+      ? (form.precio_flete || 0) - (form.precio_pagado_al_externo || 0) - (form.insumos_estacion_monto || 0) + (form.ingresos_extras_monto || 0)
+      : (form.precio_flete || 0) - costoCombustible - (form.viatico || 0) - (form.otros_costos || 0) - (form.insumos_estacion_monto || 0) + (form.ingresos_extras_monto || 0);
+  const ingresosTotales = (form.precio_flete || 0) + (form.ingresos_extras_monto || 0);
+  const margenPct = ingresosTotales > 0 ? (utilidadBruta / ingresosTotales) * 100 : 0;
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
@@ -393,6 +403,8 @@ function ViajeModal({
       comision_recibida: form.comision_recibida || 0,
       insumos_estacion_monto: form.insumos_estacion_monto || 0,
       insumos_estacion_detalle: form.insumos_estacion_detalle || null,
+      ingresos_extras_monto: form.ingresos_extras_monto || 0,
+      ingresos_extras_detalle: form.ingresos_extras_detalle || null,
     };
     try {
       if (viaje) {
@@ -662,6 +674,28 @@ function ViajeModal({
               </div>
             </div>
           </div>
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="text-sm font-bold text-teus-text_dark">💰 Ingresos extras (opcional)</div>
+              <div className="text-[10px] text-teus-text_muted">(estadías, reintegros peaje, adicionales — cobra el cliente, suma a tu utilidad)</div>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="col-span-2">
+                <label className={labelCls}>Descripción</label>
+                <input type="text" value={form.ingresos_extras_detalle || ""}
+                  onChange={(e) => setForm({ ...form, ingresos_extras_detalle: e.target.value })}
+                  placeholder="Ej: Estadía 8hs puerto"
+                  className={inputCls} />
+              </div>
+              <div>
+                <label className={labelCls}>Monto (Gs.)</label>
+                <input type="number" value={form.ingresos_extras_monto || ""}
+                  onChange={(e) => setForm({ ...form, ingresos_extras_monto: parseInt(e.target.value) || 0 })}
+                  className={inputCls} />
+                <div className="text-[10px] text-blue-700 font-bold mt-1">{fmtGs(form.ingresos_extras_monto || 0)}</div>
+              </div>
+            </div>
+          </div>
           <div className="bg-teus-hover_light border border-teus-border_light rounded-xl p-4">
             <div className="flex items-center gap-2 mb-3">
               <DollarSign className="w-4 h-4 text-teus-accent" />
@@ -690,7 +724,10 @@ function ViajeModal({
             <div className="mt-4 grid grid-cols-3 gap-3">
               <div className="bg-white border border-teus-border_light rounded-lg p-3">
                 <div className="text-[9px] uppercase tracking-wider text-teus-text_muted font-bold">Ingresos</div>
-                <div className="text-sm font-bold text-teus-text_dark mt-1">{fmtGs(form.precio_flete)}</div>
+                <div className="text-sm font-bold text-teus-text_dark mt-1">{fmtGs(ingresosTotales)}</div>
+                {(form.ingresos_extras_monto || 0) > 0 && (
+                  <div className="text-[9px] text-blue-700 mt-0.5">Flete {fmtGs(form.precio_flete)} + extras {fmtGs(form.ingresos_extras_monto)}</div>
+                )}
               </div>
               <div className="bg-white border border-teus-border_light rounded-lg p-3">
                 <div className="text-[9px] uppercase tracking-wider text-teus-text_muted font-bold">Costos totales</div>
