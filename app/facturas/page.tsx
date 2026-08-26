@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Plus, Edit2, Trash2, X, FileText, Search, Loader2, Calendar, TrendingUp, DollarSign, AlertTriangle } from "lucide-react";
+import { Plus, Edit2, Trash2, X, FileText, Search, Loader2, Calendar, TrendingUp, DollarSign, AlertTriangle, Link2 } from "lucide-react";
 type Cliente = { id: string; nombre: string; credito_dias: number };
 type Factura = {
   id: string;
@@ -16,6 +16,18 @@ type Factura = {
   observacion: string | null;
   cliente?: Cliente | null;
 };
+type ViajeSlim = {
+  id: string;
+  fecha: string;
+  origen: string;
+  destino: string;
+  nro_contenedor: string | null;
+  precio_flete: number;
+  ingresos_extras_monto: number;
+  factura_id: string | null;
+  vehiculo_id: string | null;
+  vehiculo?: { nombre_equipo: string } | null;
+};
 const MESES_ES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 const ESTADOS: Record<string, { label: string; classes: string }> = {
   pagado: { label: "Pagado", classes: "bg-teus-success-light text-teus-success" },
@@ -26,7 +38,6 @@ const ESTADOS: Record<string, { label: string; classes: string }> = {
 };
 function fmtGs(n: number) { return "Gs. " + Math.round(n || 0).toLocaleString("es-PY"); }
 function fmtGsShort(n: number) { return "Gs. " + Math.round(n || 0).toLocaleString("es-PY"); }
-// Helpers de fecha (evitan timezone drift Paraguay UTC-3)
 function parseFechaLocal(iso: string): Date {
   const [y, m, d] = iso.split("-").map(Number);
   return new Date(y, m - 1, d);
@@ -105,13 +116,19 @@ export default function FacturasPage() {
     return { total, pagado, pendiente, vencido, cantidad: filtered.length };
   }, [filtered]);
   async function deleteFactura(f: Factura) {
-    if (!confirm(`¿Eliminar factura ${f.nro_factura}?\n\nEsta acción no se puede deshacer.`)) return;
+    if (!confirm(`¿Eliminar factura ${f.nro_factura}?\n\nLos viajes vinculados vuelven a PENDIENTE.\nEsta acción no se puede deshacer.`)) return;
+    // Primero desvincular viajes y ponerlos en pendiente
+    await supabase.from("viajes").update({ factura_id: null, estado: "pendiente" }).eq("factura_id", f.id);
+    // Después eliminar factura
     await supabase.from("facturas").delete().eq("id", f.id);
     loadData();
   }
   async function marcarPagado(f: Factura) {
-    if (!confirm(`¿Marcar factura ${f.nro_factura} como PAGADA?`)) return;
-    await supabase.from("facturas").update({ estado: "pagado", fecha_cobro: toISODate(new Date()) }).eq("id", f.id);
+    if (!confirm(`¿Marcar factura ${f.nro_factura} como PAGADA?\n\nLos viajes vinculados pasan a COBRADO.`)) return;
+    const hoy = toISODate(new Date());
+    await supabase.from("facturas").update({ estado: "pagado", fecha_cobro: hoy }).eq("id", f.id);
+    // Actualizar viajes vinculados a cobrado
+    await supabase.from("viajes").update({ estado: "cobrado" }).eq("factura_id", f.id);
     loadData();
   }
   return (
@@ -122,7 +139,7 @@ export default function FacturasPage() {
             <FileText className="w-8 h-8 text-teus-accent" />
             Facturas y Cobros
           </h1>
-          <p className="text-sm text-teus-text_muted mt-1">Control de facturación y cobranza</p>
+          <p className="text-sm text-teus-text_muted mt-1">Control de facturación y cobranza · Vincular viajes desde el modal</p>
         </div>
         <button onClick={() => { setEditing(null); setShowModal(true); }} className="bg-teus-accent hover:bg-teus-accent-2 text-white font-bold px-5 py-2.5 rounded-lg shadow-accent-glow transition-all hover:-translate-y-0.5 text-sm flex items-center gap-2">
           <Plus className="w-4 h-4" />Nueva Factura
@@ -224,12 +241,8 @@ export default function FacturasPage() {
   );
 }
 function KpiCard({ label, value, sub, color, icon: Icon }: any) {
-  const colorMap: Record<string, string> = {
-    text_dark: "text-teus-text_dark", success: "text-teus-success", warn: "text-teus-warn", danger: "text-teus-danger"
-  };
-  const bgMap: Record<string, string> = {
-    text_dark: "bg-teus-accent/10", success: "bg-teus-success-light", warn: "bg-teus-warn-light", danger: "bg-teus-danger-light"
-  };
+  const colorMap: Record<string, string> = { text_dark: "text-teus-text_dark", success: "text-teus-success", warn: "text-teus-warn", danger: "text-teus-danger" };
+  const bgMap: Record<string, string> = { text_dark: "bg-teus-accent/10", success: "bg-teus-success-light", warn: "bg-teus-warn-light", danger: "bg-teus-danger-light" };
   return (
     <div className="bg-teus-card_light border border-teus-border_light rounded-2xl p-4 shadow-card">
       <div className="flex items-start justify-between mb-2">
@@ -241,7 +254,7 @@ function KpiCard({ label, value, sub, color, icon: Icon }: any) {
     </div>
   );
 }
-function FacturaModal({ factura, clientes, facturas, onClose, onSaved }: {
+function FacturaModal({ factura, clientes, onClose, onSaved }: {
   factura: Factura | null; clientes: Cliente[]; facturas: Factura[]; onClose: () => void; onSaved: () => void;
 }) {
   const supabase = createClient();
@@ -258,26 +271,90 @@ function FacturaModal({ factura, clientes, facturas, onClose, onSaved }: {
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Auto-sugerir próximo N° factura al abrir "Nueva"
+  const [viajesDisponibles, setViajesDisponibles] = useState<ViajeSlim[]>([]);
+  const [viajesSeleccionados, setViajesSeleccionados] = useState<Set<string>>(new Set());
+  const [cargandoViajes, setCargandoViajes] = useState(false);
+  const [montoAutoCalculado, setMontoAutoCalculado] = useState(false);
   useEffect(() => {
     if (!factura) {
-      // Busca el número más alto comparando la parte numérica (no alfabético)
-      let maxNum = 0;
-      let maxStr = "";
-      for (const f of facturas) {
-        const partes = f.nro_factura.split("-");
-        if (partes.length === 3) {
-          const num = parseInt(partes[2]);
-          if (!isNaN(num) && num > maxNum) {
-            maxNum = num;
-            maxStr = f.nro_factura;
-          }
-        }
+      async function fetchLast() {
+        const { data } = await supabase.from("facturas")
+          .select("nro_factura")
+          .order("nro_factura", { ascending: false })
+          .limit(1);
+        const ultimo = data && data[0] ? data[0].nro_factura : null;
+        setForm(prev => ({ ...prev, nro_factura: siguienteNumero(ultimo) }));
       }
-      setForm(prev => ({ ...prev, nro_factura: siguienteNumero(maxStr || null) }));
+      fetchLast();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // Cargar viajes disponibles cuando cambia el cliente
+  useEffect(() => {
+    async function fetchViajes() {
+      if (!form.cliente_id) {
+        setViajesDisponibles([]);
+        setViajesSeleccionados(new Set());
+        return;
+      }
+      setCargandoViajes(true);
+      // Traer viajes del cliente: pendientes (factura_id null) O ya vinculados a esta factura (para poder desmarcar)
+      let query = supabase.from("viajes")
+        .select("id, fecha, origen, destino, nro_contenedor, precio_flete, ingresos_extras_monto, factura_id, vehiculo_id, vehiculo:vehiculo_id(nombre_equipo)")
+        .eq("cliente_id", form.cliente_id)
+        .order("fecha", { ascending: false });
+      if (factura) {
+        query = query.or(`factura_id.is.null,factura_id.eq.${factura.id}`);
+      } else {
+        query = query.is("factura_id", null);
+      }
+      const { data } = await query;
+      const viajesData = (data as any as ViajeSlim[]) || [];
+      setViajesDisponibles(viajesData);
+      // Preseleccionar los que ya estaban vinculados a esta factura
+      if (factura) {
+        const preSeleccionados = new Set(viajesData.filter(v => v.factura_id === factura.id).map(v => v.id));
+        setViajesSeleccionados(preSeleccionados);
+      } else {
+        setViajesSeleccionados(new Set());
+      }
+      setCargandoViajes(false);
+    }
+    fetchViajes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.cliente_id]);
+  // Autocalcular monto cuando cambian los viajes seleccionados
+  const totalViajesSeleccionados = useMemo(() => {
+    return viajesDisponibles
+      .filter(v => viajesSeleccionados.has(v.id))
+      .reduce((s, v) => s + (v.precio_flete || 0) + (v.ingresos_extras_monto || 0), 0);
+  }, [viajesDisponibles, viajesSeleccionados]);
+  useEffect(() => {
+    if (viajesSeleccionados.size > 0 && !montoAutoCalculado) {
+      // Solo autocalcular la primera vez o cuando cambia la selección después de haber sido autocalculado
+      setForm(prev => ({ ...prev, monto: totalViajesSeleccionados }));
+      setMontoAutoCalculado(true);
+    } else if (montoAutoCalculado) {
+      setForm(prev => ({ ...prev, monto: totalViajesSeleccionados }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [totalViajesSeleccionados]);
+  function toggleViaje(id: string) {
+    setViajesSeleccionados(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+    setMontoAutoCalculado(true);
+  }
+  function toggleTodos() {
+    if (viajesSeleccionados.size === viajesDisponibles.length) {
+      setViajesSeleccionados(new Set());
+    } else {
+      setViajesSeleccionados(new Set(viajesDisponibles.map(v => v.id)));
+    }
+    setMontoAutoCalculado(true);
+  }
   function updateEmision(fecha: string) {
     const nueva: any = { ...form, fecha_emision: fecha };
     if (form.credito_dias > 0 && fecha) {
@@ -310,6 +387,7 @@ function FacturaModal({ factura, clientes, facturas, onClose, onSaved }: {
       }
     }
     setForm(nueva);
+    setMontoAutoCalculado(false); // reset para autocalcular
   }
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -321,12 +399,30 @@ function FacturaModal({ factura, clientes, facturas, onClose, onSaved }: {
       observacion: form.observacion || null,
     };
     try {
+      let facturaId: string;
       if (factura) {
         const { error } = await supabase.from("facturas").update(payload).eq("id", factura.id);
         if (error) throw error;
+        facturaId = factura.id;
       } else {
-        const { error } = await supabase.from("facturas").insert(payload);
+        const { data, error } = await supabase.from("facturas").insert(payload).select("id").single();
         if (error) throw error;
+        facturaId = data.id;
+      }
+      // Sincronizar viajes vinculados
+      const idsSeleccionados = Array.from(viajesSeleccionados);
+      if (factura) {
+        // Si es edición, primero desvincular los que ya no están (poner en pendiente)
+        const yaVinculados = viajesDisponibles.filter(v => v.factura_id === factura.id).map(v => v.id);
+        const desvinculados = yaVinculados.filter(id => !viajesSeleccionados.has(id));
+        if (desvinculados.length > 0) {
+          await supabase.from("viajes").update({ factura_id: null, estado: "pendiente" }).in("id", desvinculados);
+        }
+      }
+      // Vincular seleccionados con estado según la factura
+      if (idsSeleccionados.length > 0) {
+        const estadoViaje = form.estado === "pagado" ? "cobrado" : "facturado";
+        await supabase.from("viajes").update({ factura_id: facturaId, estado: estadoViaje }).in("id", idsSeleccionados);
       }
       onSaved();
     } catch (err: any) { setError(err.message || "Error al guardar"); }
@@ -336,7 +432,7 @@ function FacturaModal({ factura, clientes, facturas, onClose, onSaved }: {
   const labelCls = "text-xs font-bold text-teus-text_muted uppercase tracking-wider";
   return (
     <div className="fixed inset-0 bg-teus-text_dark/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
-      <div className="bg-white border border-teus-border_light rounded-2xl w-full max-w-2xl shadow-2xl animate-slide-up max-h-[92vh] overflow-y-auto">
+      <div className="bg-white border border-teus-border_light rounded-2xl w-full max-w-3xl shadow-2xl animate-slide-up max-h-[92vh] overflow-y-auto">
         <div className="flex items-center justify-between p-6 border-b border-teus-border_light sticky top-0 bg-white z-10">
           <h2 className="text-lg font-bold text-teus-text_dark">{factura ? "Editar Factura" : "Nueva Factura"}</h2>
           <button onClick={onClose} className="p-2 rounded-lg hover:bg-teus-hover_light text-teus-text_muted hover:text-teus-text_dark transition"><X className="w-5 h-5" /></button>
@@ -362,6 +458,69 @@ function FacturaModal({ factura, clientes, facturas, onClose, onSaved }: {
               {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
             </select>
           </div>
+          {/* Panel de viajes disponibles del cliente */}
+          {form.cliente_id && (
+            <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <Link2 className="w-4 h-4 text-blue-700" />
+                  <h3 className="text-sm font-bold text-blue-900">📋 Viajes de este cliente</h3>
+                </div>
+                {viajesDisponibles.length > 0 && (
+                  <button type="button" onClick={toggleTodos} className="text-xs text-blue-700 hover:underline font-bold">
+                    {viajesSeleccionados.size === viajesDisponibles.length ? "Desmarcar todos" : "Marcar todos"}
+                  </button>
+                )}
+              </div>
+              <p className="text-xs text-blue-800 mb-3">Marcá los viajes que van en esta factura. El monto se autocalcula.</p>
+              {cargandoViajes ? (
+                <div className="text-center py-4 text-blue-700"><Loader2 className="w-5 h-5 animate-spin mx-auto" /></div>
+              ) : viajesDisponibles.length === 0 ? (
+                <div className="text-center py-4 text-blue-700 text-sm">No hay viajes pendientes de este cliente</div>
+              ) : (
+                <div className="max-h-64 overflow-y-auto bg-white rounded-lg border border-blue-200">
+                  <table className="w-full text-xs">
+                    <thead className="bg-blue-100 sticky top-0">
+                      <tr>
+                        <th className="p-2 w-8"></th>
+                        <th className="p-2 text-left">Fecha</th>
+                        <th className="p-2 text-left">Equipo</th>
+                        <th className="p-2 text-left">Contenedor</th>
+                        <th className="p-2 text-left">Ruta</th>
+                        <th className="p-2 text-right">Flete</th>
+                        <th className="p-2 text-right">Extras</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {viajesDisponibles.map(v => {
+                        const marcado = viajesSeleccionados.has(v.id);
+                        const total = (v.precio_flete || 0) + (v.ingresos_extras_monto || 0);
+                        return (
+                          <tr key={v.id} className={`border-t border-blue-100 hover:bg-blue-50 cursor-pointer ${marcado ? "bg-blue-50" : ""}`} onClick={() => toggleViaje(v.id)}>
+                            <td className="p-2 text-center"><input type="checkbox" checked={marcado} onChange={() => toggleViaje(v.id)} className="w-4 h-4 accent-blue-600" /></td>
+                            <td className="p-2">{fmtFecha(v.fecha)}</td>
+                            <td className="p-2 font-bold">{v.vehiculo?.nombre_equipo || "—"}</td>
+                            <td className="p-2 font-mono text-[10px]">{v.nro_contenedor || "—"}</td>
+                            <td className="p-2">{v.origen}→{v.destino}</td>
+                            <td className="p-2 text-right font-bold">{fmtGs(v.precio_flete)}</td>
+                            <td className="p-2 text-right text-blue-700">{(v.ingresos_extras_monto || 0) > 0 ? fmtGs(v.ingresos_extras_monto) : "—"}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <div className="mt-3 flex justify-between items-center text-sm">
+                <div className="text-blue-900 font-bold">
+                  Seleccionados: <span className="text-lg">{viajesSeleccionados.size}</span> de {viajesDisponibles.length}
+                </div>
+                <div className="text-blue-900 font-bold">
+                  Total autocalculado: <span className="text-lg">{fmtGs(totalViajesSeleccionados)}</span>
+                </div>
+              </div>
+            </div>
+          )}
           <div className="grid grid-cols-3 gap-4">
             <div>
               <label className={labelCls}>Fecha emisión *</label>
@@ -379,8 +538,11 @@ function FacturaModal({ factura, clientes, facturas, onClose, onSaved }: {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className={labelCls}>Monto (Gs.) *</label>
-              <input type="number" value={form.monto} onChange={(e) => setForm({ ...form, monto: parseInt(e.target.value) || 0 })} required className={inputCls} />
+              <input type="number" value={form.monto} onChange={(e) => { setForm({ ...form, monto: parseInt(e.target.value) || 0 }); setMontoAutoCalculado(false); }} required className={inputCls} />
               {form.monto > 0 && <div className="text-[10px] text-teus-accent font-bold mt-1">= {fmtGs(form.monto)}</div>}
+              {viajesSeleccionados.size > 0 && form.monto !== totalViajesSeleccionados && (
+                <div className="text-[10px] text-orange-600 font-bold mt-1">⚠️ No coincide con el total autocalculado ({fmtGs(totalViajesSeleccionados)})</div>
+              )}
             </div>
             <div>
               <label className={labelCls}>Fecha de cobro (si pagada)</label>
