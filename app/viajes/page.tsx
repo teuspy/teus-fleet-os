@@ -40,6 +40,8 @@ type Viaje = {
   insumos_estacion_detalle: string | null;
   ingresos_extras_monto: number;
   ingresos_extras_detalle: string | null;
+  factura_id: string | null;
+  factura?: { nro_factura: string } | null;
   vehiculo?: Vehiculo | null;
   chofer?: Chofer | null;
   cliente?: Cliente | null;
@@ -90,7 +92,7 @@ export default function ViajesPage() {
     ] = await Promise.all([
       supabase
         .from("viajes")
-        .select("*, vehiculo:vehiculo_id(id, nombre_equipo, tipo, chapa), chofer:chofer_id(id, nombre_completo), cliente:cliente_id(id, nombre, credito_dias)")
+        .select("*, vehiculo:vehiculo_id(id, nombre_equipo, tipo, chapa), chofer:chofer_id(id, nombre_completo), cliente:cliente_id(id, nombre, credito_dias), factura:factura_id(nro_factura)")
         .gte("fecha", startDate)
         .lte("fecha", endDate)
         .order("fecha", { ascending: false }),
@@ -121,7 +123,7 @@ export default function ViajesPage() {
     if (filterEstado && v.estado !== filterEstado) return false;
     if (search) {
       const q = search.toLowerCase();
-      const searchStr = `${v.vehiculo?.nombre_equipo || ""} ${v.chofer?.nombre_completo || ""} ${v.cliente?.nombre || ""} ${v.nro_contenedor || ""} ${v.origen} ${v.destino}`.toLowerCase();
+      const searchStr = `${v.vehiculo?.nombre_equipo || ""} ${v.chofer?.nombre_completo || ""} ${v.cliente?.nombre || ""} ${v.nro_contenedor || ""} ${v.factura?.nro_factura || ""} ${v.origen} ${v.destino}`.toLowerCase();
       if (!searchStr.includes(q)) return false;
     }
     return true;
@@ -134,6 +136,10 @@ export default function ViajesPage() {
     return { totalViajes, facturacion, utilidadBruta, kmTotal };
   }, [filtered]);
   async function deleteViaje(v: Viaje) {
+    if (v.factura_id) {
+      alert(`Este viaje está vinculado a la factura ${v.factura?.nro_factura || ""}. Desvinculalo primero desde la factura.`);
+      return;
+    }
     if (!confirm(`¿Eliminar el viaje del ${v.fecha}?\n(${v.origen} → ${v.destino}, ${v.vehiculo?.nombre_equipo})\n\nEsta acción no se puede deshacer.`)) return;
     await supabase.from("viajes").delete().eq("id", v.id);
     loadData();
@@ -224,6 +230,7 @@ export default function ViajesPage() {
                   <th className="px-3 py-3 font-bold">Cliente</th>
                   <th className="px-3 py-3 font-bold">Ruta</th>
                   <th className="px-3 py-3 font-bold">Contenedor</th>
+                  <th className="px-3 py-3 font-bold">Factura</th>
                   <th className="px-3 py-3 font-bold text-right">Flete</th>
                   <th className="px-3 py-3 font-bold text-right">Utilidad</th>
                   <th className="px-3 py-3 font-bold">Estado</th>
@@ -246,6 +253,15 @@ export default function ViajesPage() {
                       {v.km_viaje ? <span className="ml-2 text-teus-accent font-bold">{v.km_viaje}km</span> : null}
                     </td>
                     <td className="px-3 py-3 font-mono text-[10px] text-teus-text_muted">{v.nro_contenedor || "—"}</td>
+                    <td className="px-3 py-3">
+                      {v.factura?.nro_factura ? (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold px-2 py-1 rounded bg-blue-50 text-blue-700 border border-blue-200">
+                          📄 {v.factura.nro_factura}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-teus-text_soft">—</span>
+                      )}
+                    </td>
                     <td className="px-3 py-3 text-right font-semibold text-teus-text_dark whitespace-nowrap">
                       {fmtGsShort(v.precio_flete)}
                       {(v.ingresos_extras_monto || 0) > 0 && (
@@ -439,6 +455,11 @@ function ViajeModal({
             <X className="w-5 h-5" />
           </button>
         </div>
+        {viaje?.factura_id && (
+          <div className="mx-6 mt-4 bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-900">
+            📄 Este viaje está vinculado a la factura <strong className="font-mono">{viaje.factura?.nro_factura || viaje.factura_id}</strong>. Si querés desvincularlo, editá la factura y sacá el check de este viaje.
+          </div>
+        )}
         <form onSubmit={handleSubmit} className="p-6 space-y-5">
           <div className="grid grid-cols-3 gap-4">
             <div>
@@ -447,12 +468,13 @@ function ViajeModal({
             </div>
             <div>
               <label className={labelCls}>Estado</label>
-              <select value={form.estado} onChange={(e) => setForm({ ...form, estado: e.target.value as any })} className={inputCls}>
+              <select value={form.estado} onChange={(e) => setForm({ ...form, estado: e.target.value as any })} className={inputCls} disabled={!!viaje?.factura_id}>
                 <option value="pendiente">Pendiente</option>
                 <option value="facturado">Facturado</option>
                 <option value="cobrado">Cobrado</option>
                 <option value="cancelado">Cancelado</option>
               </select>
+              {viaje?.factura_id && <div className="text-[10px] text-blue-700 font-bold mt-1">Estado gestionado desde la factura</div>}
             </div>
             <div>
               <label className={labelCls}>N° Contenedor</label>
