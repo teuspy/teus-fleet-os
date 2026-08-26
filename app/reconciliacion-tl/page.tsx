@@ -8,6 +8,7 @@ type Viaje = {
   fecha: string;
   vehiculo_id: string | null;
   cliente_id: string | null;
+  chofer_id: string | null;
   vehiculo_externo_id: string | null;
   chofer_externo_nombre: string | null;
   origen: string;
@@ -27,6 +28,7 @@ type Viaje = {
   nro_contenedor: string | null;
   cliente?: { nombre: string } | null;
   vehiculo?: { alias: string | null; chapa: string } | null;
+  chofer?: { nombre_completo: string } | null;
 };
 type PagoViatico = {
   id: string;
@@ -77,7 +79,7 @@ export default function ReconciliacionTLPage() {
     const endDate = `${year}-${String(month).padStart(2, "0")}-${endDay}`;
     const [viajesRes, pagosRes, recargasRes] = await Promise.all([
       supabase.from("viajes")
-        .select("*, cliente:cliente_id(nombre), vehiculo:vehiculo_id(alias, chapa)")
+        .select("*, cliente:cliente_id(nombre), vehiculo:vehiculo_id(alias, chapa), chofer:chofer_id(nombre_completo)")
         .gte("fecha", startDate).lte("fecha", endDate)
         .order("fecha"),
       supabase.from("pagos_viatico")
@@ -149,7 +151,7 @@ export default function ReconciliacionTLPage() {
       }
       const [viajesRes, pagosRes, recargasRes] = await Promise.all([
         supabase.from("viajes")
-          .select("*, cliente:cliente_id(nombre), vehiculo:vehiculo_id(alias, chapa)")
+          .select("*, cliente:cliente_id(nombre), vehiculo:vehiculo_id(alias, chapa), chofer:chofer_id(nombre_completo)")
           .gte("fecha", startDate).lte("fecha", endDate)
           .order("fecha"),
         supabase.from("pagos_viatico")
@@ -215,10 +217,10 @@ export default function ReconciliacionTLPage() {
       XLSX.utils.book_append_sheet(wb, ws1, "Resumen");
       if (vsPropio.length > 0) {
         const comb = [
-          ["Fecha", "Equipo", "Cliente", "Ruta", "Litros", "Gs/Litro", "Costo Total"],
+          ["Fecha", "Chofer", "Cliente", "Ruta", "Litros", "Gs/Litro", "Costo Total"],
           ...vsPropio.map(v => [
             fmtFechaFull(v.fecha),
-            v.vehiculo?.alias || "-",
+            v.chofer?.nombre_completo || "-",
             v.cliente?.nombre || "-",
             `${v.origen} → ${v.destino}`,
             v.litros || 0,
@@ -228,7 +230,7 @@ export default function ReconciliacionTLPage() {
           ["", "", "", "TOTAL", litrosV, "", combViajes],
         ];
         const ws = XLSX.utils.aoa_to_sheet(comb);
-        ws["!cols"] = [{ wch: 12 }, { wch: 14 }, { wch: 30 }, { wch: 30 }, { wch: 10 }, { wch: 12 }, { wch: 16 }];
+        ws["!cols"] = [{ wch: 12 }, { wch: 22 }, { wch: 30 }, { wch: 30 }, { wch: 10 }, { wch: 12 }, { wch: 16 }];
         XLSX.utils.book_append_sheet(wb, ws, "Combustible viajes");
       }
       if (rs.length > 0) {
@@ -250,10 +252,10 @@ export default function ReconciliacionTLPage() {
       const vsConViatico = vsPropio.filter(v => (v.viatico || 0) > 0);
       if (vsConViatico.length > 0) {
         const via = [
-          ["Fecha", "Equipo", "Cliente", "Ruta", "Viático"],
+          ["Fecha", "Chofer", "Cliente", "Ruta", "Viático"],
           ...vsConViatico.map(v => [
             fmtFechaFull(v.fecha),
-            v.vehiculo?.alias || "-",
+            v.chofer?.nombre_completo || "-",
             v.cliente?.nombre || "-",
             `${v.origen} → ${v.destino}`,
             v.viatico || 0,
@@ -261,16 +263,16 @@ export default function ReconciliacionTLPage() {
           ["", "", "", "TOTAL", totalViat],
         ];
         const ws = XLSX.utils.aoa_to_sheet(via);
-        ws["!cols"] = [{ wch: 12 }, { wch: 14 }, { wch: 30 }, { wch: 30 }, { wch: 16 }];
+        ws["!cols"] = [{ wch: 12 }, { wch: 22 }, { wch: 30 }, { wch: 30 }, { wch: 16 }];
         XLSX.utils.book_append_sheet(wb, ws, "Viáticos");
       }
       const vsConInsumos = vsPropio.filter(v => (v.insumos_estacion_monto || 0) > 0);
       if (vsConInsumos.length > 0) {
         const ins = [
-          ["Fecha", "Equipo", "Cliente", "Descripción", "Monto"],
+          ["Fecha", "Chofer", "Cliente", "Descripción", "Monto"],
           ...vsConInsumos.map(v => [
             fmtFechaFull(v.fecha),
-            v.vehiculo?.alias || "-",
+            v.chofer?.nombre_completo || "-",
             v.cliente?.nombre || "-",
             v.insumos_estacion_detalle || "-",
             v.insumos_estacion_monto || 0,
@@ -278,7 +280,7 @@ export default function ReconciliacionTLPage() {
           ["", "", "", "TOTAL", insumos],
         ];
         const ws = XLSX.utils.aoa_to_sheet(ins);
-        ws["!cols"] = [{ wch: 12 }, { wch: 14 }, { wch: 30 }, { wch: 40 }, { wch: 16 }];
+        ws["!cols"] = [{ wch: 12 }, { wch: 22 }, { wch: 30 }, { wch: 40 }, { wch: 16 }];
         XLSX.utils.book_append_sheet(wb, ws, "Insumos extra");
       }
       if (vsTL.length > 0) {
@@ -308,11 +310,11 @@ export default function ReconciliacionTLPage() {
       }
       if (vsParaTL.length > 0) {
         const para = [
-          ["Fecha", "Equipo", "Chofer", "Contenedor", "Ruta", "Flete facturado", "Estadía"],
+          ["Fecha", "Chofer", "Equipo", "Contenedor", "Ruta", "Flete facturado", "Estadía"],
           ...vsParaTL.map(v => [
             fmtFechaFull(v.fecha),
+            v.chofer?.nombre_completo || "-",
             v.vehiculo?.alias || "-",
-            "-",
             v.nro_contenedor || "-",
             `${v.origen} → ${v.destino}`,
             v.precio_flete || 0,
@@ -321,7 +323,7 @@ export default function ReconciliacionTLPage() {
           ["", "", "", "", "TOTAL", totalFletesPara, estadiasPara],
         ];
         const ws = XLSX.utils.aoa_to_sheet(para);
-        ws["!cols"] = [{ wch: 12 }, { wch: 14 }, { wch: 20 }, { wch: 16 }, { wch: 30 }, { wch: 16 }, { wch: 14 }];
+        ws["!cols"] = [{ wch: 12 }, { wch: 22 }, { wch: 14 }, { wch: 16 }, { wch: 30 }, { wch: 16 }, { wch: 14 }];
         XLSX.utils.book_append_sheet(wb, ws, "Fletes para TL");
       }
       if (ps.length > 0) {
@@ -557,7 +559,7 @@ export default function ReconciliacionTLPage() {
                     <th className="text-left p-2">Fecha</th>
                     <th className="text-left p-2">Cliente</th>
                     <th className="text-left p-2">Ruta</th>
-                    <th className="text-left p-2">Equipo</th>
+                    <th className="text-left p-2">Chofer</th>
                     <th className="text-right p-2">Litros</th>
                     <th className="text-right p-2">Combustible</th>
                     <th className="text-right p-2">Viático</th>
@@ -570,7 +572,7 @@ export default function ReconciliacionTLPage() {
                       <td className="p-2">{fmtFecha(v.fecha)}</td>
                       <td className="p-2">{v.cliente?.nombre || "-"}</td>
                       <td className="p-2">{v.origen}→{v.destino}</td>
-                      <td className="p-2">{v.vehiculo?.alias || "-"}</td>
+                      <td className="p-2 font-semibold">{v.chofer?.nombre_completo || "-"}</td>
                       <td className="p-2 text-right">{v.litros}</td>
                       <td className="p-2 text-right text-red-600 font-bold">{fmtGs(v.costo_combustible)}</td>
                       <td className="p-2 text-right text-red-600 font-bold">{fmtGs(v.viatico)}</td>
@@ -653,7 +655,7 @@ export default function ReconciliacionTLPage() {
                       <th className="text-left p-2">Fecha</th>
                       <th className="text-left p-2">Contenedor</th>
                       <th className="text-left p-2">Ruta</th>
-                      <th className="text-left p-2">Equipo</th>
+                      <th className="text-left p-2">Chofer</th>
                       <th className="text-right p-2">Flete</th>
                       <th className="text-right p-2">Estadía</th>
                     </tr>
@@ -664,7 +666,7 @@ export default function ReconciliacionTLPage() {
                         <td className="p-2">{fmtFecha(v.fecha)}</td>
                         <td className="p-2 font-mono">{v.nro_contenedor || "-"}</td>
                         <td className="p-2">{v.origen}→{v.destino}</td>
-                        <td className="p-2">{v.vehiculo?.alias || "-"}</td>
+                        <td className="p-2 font-semibold">{v.chofer?.nombre_completo || "-"}</td>
                         <td className="p-2 text-right font-bold text-green-600">{fmtGs(v.precio_flete)}</td>
                         <td className="p-2 text-right font-bold text-green-600">{fmtGs(v.ingresos_extras_monto || 0)}</td>
                       </tr>
@@ -702,7 +704,7 @@ export default function ReconciliacionTLPage() {
                         <tr key={v.id} className="border-t border-teus-border_light">
                           <td className="p-2">{fmtFecha(v.fecha)}</td>
                           <td className="p-2">{v.cliente?.nombre || "-"}</td>
-                          <td className="p-2">{v.chofer_externo_nombre || "-"}</td>
+                          <td className="p-2 font-semibold">{v.chofer_externo_nombre || "-"}</td>
                           <td className="p-2">{v.origen}→{v.destino}</td>
                           <td className="p-2 text-right">{fmtGs(pagado)}</td>
                           <td className="p-2 text-right text-green-600">{fmtGs(com)}</td>
