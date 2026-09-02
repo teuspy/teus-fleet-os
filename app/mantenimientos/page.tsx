@@ -409,7 +409,7 @@ function MantModal({ mant, preSelectedVeh, onClose }: { mant: Mantenimiento | nu
       taller_id: form.taller_id || null,
       monto: montoFinal,
       observaciones: form.observaciones.trim() || null,
-      proximo_km: km + 20000,
+           proximo_km: km ? km + (vehSel?.intervalo_mantenimiento_km || 35000) : null,
       sistema_afectado: form.sistema_afectado || null,
       tipo_intervencion: form.tipo_intervencion || null,
       es_repetido: form.es_repetido,
