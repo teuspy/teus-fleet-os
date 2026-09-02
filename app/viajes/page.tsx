@@ -40,11 +40,17 @@ type Viaje = {
   insumos_estacion_detalle: string | null;
   ingresos_extras_monto: number;
   ingresos_extras_detalle: string | null;
+  tipo_ingreso_extra: string | null;
+  dias_detenido_cliente: number;
+  cliente_final_id: string | null;
+  tarifa_bruta_cliente_final: number;
+  comision_externa: number;
   factura_id: string | null;
   factura?: { nro_factura: string } | null;
   vehiculo?: Vehiculo | null;
   chofer?: Chofer | null;
   cliente?: Cliente | null;
+  cliente_final?: { nombre: string } | null;
 };
 const MESES_ES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 function fmtGs(n: number) {
@@ -59,6 +65,11 @@ const ESTADOS: Record<string, { label: string; classes: string }> = {
   cobrado: { label: "Cobrado", classes: "bg-teus-success-light text-teus-success" },
   cancelado: { label: "Cancelado", classes: "bg-teus-danger-light text-teus-danger" },
 };
+const TIPOS_INGRESO_EXTRA = [
+  { valor: "estadia", label: "🕐 Estadía" },
+  { valor: "reintegro", label: "🛣️ Reintegro peaje" },
+  { valor: "otro", label: "➕ Otro adicional" },
+];
 export default function ViajesPage() {
   const supabase = createClient();
   const searchParams = useSearchParams();
@@ -92,7 +103,7 @@ export default function ViajesPage() {
     ] = await Promise.all([
       supabase
         .from("viajes")
-        .select("*, vehiculo:vehiculo_id(id, nombre_equipo, tipo, chapa), chofer:chofer_id(id, nombre_completo), cliente:cliente_id(id, nombre, credito_dias), factura:factura_id(nro_factura)")
+        .select("*, vehiculo:vehiculo_id(id, nombre_equipo, tipo, chapa), chofer:chofer_id(id, nombre_completo), cliente:cliente_id(id, nombre, credito_dias), factura:factura_id(nro_factura), cliente_final:cliente_final_id(nombre)")
         .gte("fecha", startDate)
         .lte("fecha", endDate)
         .order("fecha", { ascending: false }),
@@ -123,7 +134,7 @@ export default function ViajesPage() {
     if (filterEstado && v.estado !== filterEstado) return false;
     if (search) {
       const q = search.toLowerCase();
-      const searchStr = `${v.vehiculo?.nombre_equipo || ""} ${v.chofer?.nombre_completo || ""} ${v.cliente?.nombre || ""} ${v.nro_contenedor || ""} ${v.factura?.nro_factura || ""} ${v.origen} ${v.destino}`.toLowerCase();
+      const searchStr = `${v.vehiculo?.nombre_equipo || ""} ${v.chofer?.nombre_completo || ""} ${v.cliente?.nombre || ""} ${v.cliente_final?.nombre || ""} ${v.nro_contenedor || ""} ${v.factura?.nro_factura || ""} ${v.origen} ${v.destino}`.toLowerCase();
       if (!searchStr.includes(q)) return false;
     }
     return true;
@@ -245,7 +256,12 @@ export default function ViajesPage() {
                     </td>
                     <td className="px-3 py-3 font-bold text-teus-text_dark">{v.vehiculo?.nombre_equipo || "—"}</td>
                     <td className="px-3 py-3 text-xs text-teus-text_muted">{v.chofer?.nombre_completo || "—"}</td>
-                    <td className="px-3 py-3 text-xs text-teus-text_dark font-semibold">{v.cliente?.nombre || "—"}</td>
+                    <td className="px-3 py-3 text-xs text-teus-text_dark font-semibold">
+                      {v.cliente?.nombre || "—"}
+                      {v.cliente_final?.nombre && (
+                        <div className="text-[9px] text-purple-700 font-bold mt-0.5">→ Final: {v.cliente_final.nombre}</div>
+                      )}
+                    </td>
                     <td className="px-3 py-3 text-xs text-teus-text_muted">
                       <span className="font-semibold text-teus-text_dark">{v.origen}</span>
                       <span className="mx-1">→</span>
@@ -358,7 +374,13 @@ function ViajeModal({
     insumos_estacion_detalle: viaje?.insumos_estacion_detalle || "",
     ingresos_extras_monto: viaje?.ingresos_extras_monto || 0,
     ingresos_extras_detalle: viaje?.ingresos_extras_detalle || "",
+    tipo_ingreso_extra: viaje?.tipo_ingreso_extra || "",
+    dias_detenido_cliente: viaje?.dias_detenido_cliente || 0,
+    cliente_final_id: viaje?.cliente_final_id || "",
+    tarifa_bruta_cliente_final: viaje?.tarifa_bruta_cliente_final || 0,
+    comision_externa: viaje?.comision_externa || 0,
   });
+  const [tieneClienteFinal, setTieneClienteFinal] = useState<boolean>(!!viaje?.cliente_final_id);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rutaSearch, setRutaSearch] = useState("");
@@ -421,6 +443,11 @@ function ViajeModal({
       insumos_estacion_detalle: form.insumos_estacion_detalle || null,
       ingresos_extras_monto: form.ingresos_extras_monto || 0,
       ingresos_extras_detalle: form.ingresos_extras_detalle || null,
+      tipo_ingreso_extra: form.tipo_ingreso_extra || null,
+      dias_detenido_cliente: form.tipo_ingreso_extra === "estadia" ? (form.dias_detenido_cliente || 0) : 0,
+      cliente_final_id: tieneClienteFinal && form.cliente_final_id ? form.cliente_final_id : null,
+      tarifa_bruta_cliente_final: tieneClienteFinal ? (form.tarifa_bruta_cliente_final || 0) : 0,
+      comision_externa: tieneClienteFinal ? (form.comision_externa || 0) : 0,
     };
     try {
       if (viaje) {
@@ -497,12 +524,57 @@ function ViajeModal({
               </select>
             </div>
             <div>
-              <label className={labelCls}>Cliente *</label>
+              <label className={labelCls}>Cliente facturado *</label>
               <select value={form.cliente_id} onChange={(e) => setForm({ ...form, cliente_id: e.target.value })} required className={inputCls}>
                 <option value="">— Elegir —</option>
                 {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
               </select>
             </div>
+          </div>
+          {/* Cliente final (opcional) - checkbox condicional */}
+          <div className="bg-purple-50 border border-purple-200 rounded-xl p-4">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={tieneClienteFinal}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  setTieneClienteFinal(checked);
+                  if (!checked) {
+                    setForm({ ...form, cliente_final_id: "", tarifa_bruta_cliente_final: 0, comision_externa: 0 });
+                  }
+                }}
+                className="w-4 h-4 accent-purple-600" />
+              <span className="text-sm font-bold text-purple-900">🎯 Cliente final distinto del facturado (ej: DONGJING facturado vía TL)</span>
+            </label>
+            {tieneClienteFinal && (
+              <div className="mt-3 space-y-3">
+                <div className="text-[10px] text-purple-800 bg-white/60 rounded p-2">
+                  ℹ️ El <strong>Precio flete</strong> abajo sigue siendo tu ingreso NETO. Los campos de tarifa bruta y comisión son informativos — no se suman ni se restan.
+                </div>
+                <div>
+                  <label className={labelCls}>Cliente final / dueño de la carga *</label>
+                  <select value={form.cliente_final_id} onChange={(e) => setForm({ ...form, cliente_final_id: e.target.value })} className={inputCls}>
+                    <option value="">— Elegir cliente final —</option>
+                    {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                  </select>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className={labelCls}>Tarifa bruta al cliente final (Gs.)</label>
+                    <input type="number" value={form.tarifa_bruta_cliente_final || ""}
+                      onChange={(e) => setForm({ ...form, tarifa_bruta_cliente_final: parseInt(e.target.value) || 0 })}
+                      placeholder="5950000" className={inputCls} />
+                    <div className="text-[10px] text-purple-700 mt-1">{fmtGs(form.tarifa_bruta_cliente_final || 0)} · informativo</div>
+                  </div>
+                  <div>
+                    <label className={labelCls}>Comisión externa (Gs.)</label>
+                    <input type="number" value={form.comision_externa || ""}
+                      onChange={(e) => setForm({ ...form, comision_externa: parseInt(e.target.value) || 0 })}
+                      placeholder="350000" className={inputCls} />
+                    <div className="text-[10px] text-purple-700 mt-1">{fmtGs(form.comision_externa || 0)} · quien absorbe (TL, otro)</div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
           <div className="bg-teus-hover_light border border-teus-border_light rounded-xl p-4">
             <div className="flex items-center gap-2 mb-3">
@@ -701,14 +773,31 @@ function ViajeModal({
               <div className="text-sm font-bold text-teus-text_dark">💰 Ingresos extras (opcional)</div>
               <div className="text-[10px] text-teus-text_muted">(estadías, reintegros peaje, adicionales — cobra el cliente, suma a tu utilidad)</div>
             </div>
-            <div className="grid grid-cols-3 gap-3">
-              <div className="col-span-2">
+            <div className="grid grid-cols-4 gap-3">
+              <div>
+                <label className={labelCls}>Tipo</label>
+                <select value={form.tipo_ingreso_extra || ""}
+                  onChange={(e) => setForm({ ...form, tipo_ingreso_extra: e.target.value, dias_detenido_cliente: e.target.value === "estadia" ? form.dias_detenido_cliente : 0 })}
+                  className={inputCls}>
+                  <option value="">— No especificado —</option>
+                  {TIPOS_INGRESO_EXTRA.map(t => <option key={t.valor} value={t.valor}>{t.label}</option>)}
+                </select>
+              </div>
+              <div className={form.tipo_ingreso_extra === "estadia" ? "" : "col-span-2"}>
                 <label className={labelCls}>Descripción</label>
                 <input type="text" value={form.ingresos_extras_detalle || ""}
                   onChange={(e) => setForm({ ...form, ingresos_extras_detalle: e.target.value })}
-                  placeholder="Ej: Estadía 8hs puerto"
+                  placeholder={form.tipo_ingreso_extra === "estadia" ? "Ej: Estadía 3 días puerto" : "Ej: Reintegro peajes"}
                   className={inputCls} />
               </div>
+              {form.tipo_ingreso_extra === "estadia" && (
+                <div>
+                  <label className={labelCls}>Días detenido cliente</label>
+                  <input type="number" min="0" value={form.dias_detenido_cliente || ""}
+                    onChange={(e) => setForm({ ...form, dias_detenido_cliente: parseInt(e.target.value) || 0 })}
+                    placeholder="0" className={inputCls} />
+                </div>
+              )}
               <div>
                 <label className={labelCls}>Monto (Gs.)</label>
                 <input type="number" value={form.ingresos_extras_monto || ""}
