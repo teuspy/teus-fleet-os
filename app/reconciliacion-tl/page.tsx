@@ -185,25 +185,34 @@ export default function ReconciliacionTLPage() {
       const rsOtros = rs.filter(r => !esProveedorDavid(r.proveedor?.nombre));
       const vsTL = vs.filter(v => v.vehiculo_externo_id === "TL");
       const vsParaTL = vs.filter(v => v.cliente?.nombre?.toUpperCase().includes("T&L") && !v.vehiculo_externo_id);
-      const combViajes = vsPropioDavid.reduce((s, v) => s + (v.costo_combustible || 0), 0);
-      const litrosV = vsPropioDavid.reduce((s, v) => s + (v.litros || 0), 0);
-      const combRec = rsDavid.reduce((s, r) => s + (r.monto_total || 0), 0);
-      const litrosR = rsDavid.reduce((s, r) => s + (r.litros || 0), 0);
-      const insumos = vsPropioDavid.reduce((s, v) => s + (v.insumos_estacion_monto || 0), 0);
-      const totalComb = combViajes + combRec + insumos;
+
+      const combViajesDavid = vsPropioDavid.reduce((s, v) => s + (v.costo_combustible || 0), 0);
+      const litrosVDavid = vsPropioDavid.reduce((s, v) => s + (v.litros || 0), 0);
+      const combRecDavid = rsDavid.reduce((s, r) => s + (r.monto_total || 0), 0);
+      const litrosRDavid = rsDavid.reduce((s, r) => s + (r.litros || 0), 0);
+      const insumosDavid = vsPropioDavid.reduce((s, v) => s + (v.insumos_estacion_monto || 0), 0);
+      const viaticosDavid = vsPropioDavid.reduce((s, v) => s + (v.viatico || 0), 0);
+      const otrosCostosDavid = vsPropioDavid.reduce((s, v) => s + (v.otros_costos || 0), 0);
+
       const totalViat = vsPropio.reduce((s, v) => s + (v.viatico || 0), 0);
+      const totalComb = combViajesDavid + combRecDavid + insumosDavid;
       const totalFletesTL = vsTL.reduce((s, v) => s + (v.precio_pagado_al_externo || v.precio_flete || 0), 0);
       const totalCom = vsTL.reduce((s, v) => s + (v.comision_recibida || 0), 0);
       const estadiasTL = vsTL.reduce((s, v) => s + (v.ingresos_extras_monto || 0), 0);
       const totalFletesPara = vsParaTL.reduce((s, v) => s + (v.precio_flete || 0), 0);
       const estadiasPara = vsParaTL.reduce((s, v) => s + (v.ingresos_extras_monto || 0), 0);
       const totalPagosViat = ps.reduce((s, p) => s + (p.monto || 0), 0);
-      const combOtrosProveedores = vsPropioOtros.reduce((s, v) => s + (v.costo_combustible || 0), 0)
-        + rsOtros.reduce((s, r) => s + (r.monto_total || 0), 0);
+
+      const combOtrosViajes = vsPropioOtros.reduce((s, v) => s + (v.costo_combustible || 0), 0);
+      const combOtrosRecargas = rsOtros.reduce((s, r) => s + (r.monto_total || 0), 0);
+      const combOtrosProveedores = combOtrosViajes + combOtrosRecargas;
+
       const totalDebo = totalComb + totalViat + totalFletesTL + estadiasTL;
       const totalMeDebe = totalFletesPara + totalCom + totalPagosViat + estadiasPara;
       const netoFinal = totalDebo - totalMeDebe;
+
       const wb = XLSX.utils.book_new();
+
       const resumen = [
         ["RECONCILIACIÓN CON DAVID (TL)"],
         [tituloRango],
@@ -211,10 +220,10 @@ export default function ReconciliacionTLPage() {
         [""],
         ["YO LE DEBO A DAVID", "", "Monto (Gs.)"],
         ["Combustible (viajes + recargas + insumos)", "", totalComb],
-        ["  · En viajes propios (solo TL)", `${litrosV} lts`, combViajes],
-        ["  · Recargas sueltas (solo TL)", `${litrosR} lts`, combRec],
-        ["  · Insumos extra estación (solo TL)", "", insumos],
-        ["Viáticos", "", totalViat],
+        ["  · En viajes propios (solo TL)", `${litrosVDavid} lts`, combViajesDavid],
+        ["  · Recargas sueltas (solo TL)", `${litrosRDavid} lts`, combRecDavid],
+        ["  · Insumos extra estación (solo TL)", "", insumosDavid],
+        ["Viáticos (todos los viajes propios)", "", totalViat],
         ["Fletes con camión TL", `${vsTL.length} viajes`, totalFletesTL],
         ["Estadías con camión TL (100%)", "", estadiasTL],
         ["TOTAL DEBO", "", totalDebo],
@@ -236,29 +245,60 @@ export default function ReconciliacionTLPage() {
       const ws1 = XLSX.utils.aoa_to_sheet(resumen);
       ws1["!cols"] = [{ wch: 45 }, { wch: 15 }, { wch: 18 }];
       XLSX.utils.book_append_sheet(wb, ws1, "Resumen");
+
       if (vsPropio.length > 0) {
-        const comb = [
-          ["Fecha", "Chofer", "Cliente", "Ruta", "Proveedor", "Cuenta con David?", "Litros", "Gs/Litro", "Costo Total"],
+        const totalLitrosAll = vsPropio.reduce((s, v) => s + (v.litros || 0), 0);
+        const totalCombAll = vsPropio.reduce((s, v) => s + (v.costo_combustible || 0), 0);
+        const totalInsAll = vsPropio.reduce((s, v) => s + (v.insumos_estacion_monto || 0), 0);
+        const totalOtrosAll = vsPropio.reduce((s, v) => s + (v.otros_costos || 0), 0);
+        const totalGeneralAll = totalCombAll + totalViat + totalInsAll + totalOtrosAll;
+        const totalGeneralDavid = combViajesDavid + viaticosDavid + insumosDavid + otrosCostosDavid;
+
+        const viajesTodoJunto: any[][] = [
+          ["Fecha", "Chofer", "Cliente", "Ruta", "Contenedor", "Proveedor combustible", "Cuenta con David?", "Litros", "Gs/Litro", "Combustible", "Viático", "Insumos", "Otros costos", "TOTAL viaje"],
           ...vsPropio.map(v => {
             const esDavid = esProveedorDavid(v.proveedor_combustible?.nombre);
+            const combustible = v.costo_combustible || 0;
+            const viatico = v.viatico || 0;
+            const insumos = v.insumos_estacion_monto || 0;
+            const otros = v.otros_costos || 0;
+            const totalViaje = combustible + viatico + insumos + otros;
             return [
               fmtFechaFull(v.fecha),
               v.chofer?.nombre_completo || "-",
               v.cliente?.nombre || "-",
               `${v.origen} → ${v.destino}`,
+              v.nro_contenedor || "-",
               v.proveedor_combustible?.nombre || "(sin proveedor)",
               esDavid ? "SÍ" : "NO",
               v.litros || 0,
               v.gs_por_litro || 0,
-              v.costo_combustible || 0,
+              combustible,
+              viatico,
+              insumos,
+              otros,
+              totalViaje,
             ];
           }),
-          ["", "", "", "", "", "TOTAL solo David", litrosV, "", combViajes],
+          [],
+          ["TOTALES — SOLO viajes con David (Petrobras/TL) — Estos son los que van al arreglo:"],
+          ["", "", "", "", "", "", `${vsPropioDavid.length} viajes`, litrosVDavid, "", combViajesDavid, viaticosDavid, insumosDavid, otrosCostosDavid, totalGeneralDavid],
+          [],
+          ["TOTALES — TODOS los viajes propios (info general):"],
+          ["", "", "", "", "", "", `${vsPropio.length} viajes`, totalLitrosAll, "", totalCombAll, totalViat, totalInsAll, totalOtrosAll, totalGeneralAll],
+          [],
+          ["INFO: Viáticos SIEMPRE se le deben a David (retirados de su estación aunque el combustible sea de otro)."],
+          ["INFO: Combustible/Insumos/Otros costos de proveedores NO-TL NO cuentan en el arreglo con David."],
         ];
-        const ws = XLSX.utils.aoa_to_sheet(comb);
-        ws["!cols"] = [{ wch: 12 }, { wch: 22 }, { wch: 30 }, { wch: 30 }, { wch: 26 }, { wch: 16 }, { wch: 10 }, { wch: 12 }, { wch: 16 }];
-        XLSX.utils.book_append_sheet(wb, ws, "Combustible viajes");
+        const ws = XLSX.utils.aoa_to_sheet(viajesTodoJunto);
+        ws["!cols"] = [
+          { wch: 12 }, { wch: 22 }, { wch: 28 }, { wch: 28 }, { wch: 14 },
+          { wch: 26 }, { wch: 18 }, { wch: 10 }, { wch: 12 }, { wch: 14 },
+          { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 16 }
+        ];
+        XLSX.utils.book_append_sheet(wb, ws, "Viajes propios (todo junto)");
       }
+
       if (rs.length > 0) {
         const rec = [
           ["Fecha", "Proveedor", "Cuenta con David?", "Litros", "Gs/Litro", "Total", "Observación"],
@@ -274,46 +314,13 @@ export default function ReconciliacionTLPage() {
               r.observacion || "-",
             ];
           }),
-          ["TOTAL solo David", "", "", litrosR, "", combRec, ""],
+          ["TOTAL solo David (TL)", "", "", litrosRDavid, "", combRecDavid, ""],
         ];
         const ws = XLSX.utils.aoa_to_sheet(rec);
-        ws["!cols"] = [{ wch: 12 }, { wch: 26 }, { wch: 16 }, { wch: 10 }, { wch: 12 }, { wch: 16 }, { wch: 40 }];
+        ws["!cols"] = [{ wch: 12 }, { wch: 26 }, { wch: 18 }, { wch: 10 }, { wch: 12 }, { wch: 16 }, { wch: 40 }];
         XLSX.utils.book_append_sheet(wb, ws, "Recargas sueltas");
       }
-      const vsConViatico = vsPropio.filter(v => (v.viatico || 0) > 0);
-      if (vsConViatico.length > 0) {
-        const via = [
-          ["Fecha", "Chofer", "Cliente", "Ruta", "Viático"],
-          ...vsConViatico.map(v => [
-            fmtFechaFull(v.fecha),
-            v.chofer?.nombre_completo || "-",
-            v.cliente?.nombre || "-",
-            `${v.origen} → ${v.destino}`,
-            v.viatico || 0,
-          ]),
-          ["", "", "", "TOTAL", totalViat],
-        ];
-        const ws = XLSX.utils.aoa_to_sheet(via);
-        ws["!cols"] = [{ wch: 12 }, { wch: 22 }, { wch: 30 }, { wch: 30 }, { wch: 16 }];
-        XLSX.utils.book_append_sheet(wb, ws, "Viáticos");
-      }
-      const vsConInsumos = vsPropioDavid.filter(v => (v.insumos_estacion_monto || 0) > 0);
-      if (vsConInsumos.length > 0) {
-        const ins = [
-          ["Fecha", "Chofer", "Cliente", "Descripción", "Monto"],
-          ...vsConInsumos.map(v => [
-            fmtFechaFull(v.fecha),
-            v.chofer?.nombre_completo || "-",
-            v.cliente?.nombre || "-",
-            v.insumos_estacion_detalle || "-",
-            v.insumos_estacion_monto || 0,
-          ]),
-          ["", "", "", "TOTAL", insumos],
-        ];
-        const ws = XLSX.utils.aoa_to_sheet(ins);
-        ws["!cols"] = [{ wch: 12 }, { wch: 22 }, { wch: 30 }, { wch: 40 }, { wch: 16 }];
-        XLSX.utils.book_append_sheet(wb, ws, "Insumos extra");
-      }
+
       if (vsTL.length > 0) {
         const fle = [
           ["Fecha", "Cliente", "Chofer TL", "Ruta", "Contenedor", "Flete pagado a David", "Comisión 5%", "Estadía", "Neto"],
@@ -339,6 +346,7 @@ export default function ReconciliacionTLPage() {
         ws["!cols"] = [{ wch: 12 }, { wch: 30 }, { wch: 18 }, { wch: 30 }, { wch: 16 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 16 }];
         XLSX.utils.book_append_sheet(wb, ws, "Fletes con camión TL");
       }
+
       if (vsParaTL.length > 0) {
         const para = [
           ["Fecha", "Chofer", "Equipo", "Contenedor", "Ruta", "Flete facturado", "Estadía"],
@@ -357,6 +365,7 @@ export default function ReconciliacionTLPage() {
         ws["!cols"] = [{ wch: 12 }, { wch: 22 }, { wch: 14 }, { wch: 16 }, { wch: 30 }, { wch: 16 }, { wch: 14 }];
         XLSX.utils.book_append_sheet(wb, ws, "Fletes para TL");
       }
+
       if (ps.length > 0) {
         const pag = [
           ["Fecha pago", "Semana pagada (lunes)", "Notas", "Monto"],
@@ -372,6 +381,7 @@ export default function ReconciliacionTLPage() {
         ws["!cols"] = [{ wch: 14 }, { wch: 22 }, { wch: 40 }, { wch: 16 }];
         XLSX.utils.book_append_sheet(wb, ws, "Pagos viáticos efectivo");
       }
+
       const nombreScope = scope === "quincena" ? `Q${quincena}` : "Mes";
       const nombreArchivo = `Reconciliacion-TL-${MESES[month-1]}-${year}-${nombreScope}.xlsx`;
       XLSX.writeFile(wb, nombreArchivo);
