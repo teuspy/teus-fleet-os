@@ -26,9 +26,11 @@ type Viaje = {
   ingresos_extras_monto: number;
   ingresos_extras_detalle: string | null;
   nro_contenedor: string | null;
+  proveedor_combustible_id: string | null;
   cliente?: { nombre: string } | null;
   vehiculo?: { alias: string | null; chapa: string } | null;
   chofer?: { nombre_completo: string } | null;
+  proveedor_combustible?: { nombre: string } | null;
 };
 type PagoViatico = {
   id: string;
@@ -46,8 +48,12 @@ type RecargaCombustible = {
   gs_por_litro: number;
   monto_total: number;
   observacion: string | null;
+  proveedor?: { nombre: string } | null;
 };
 const MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+function esProveedorDavid(nombre?: string | null): boolean {
+  return !!nombre && nombre.toUpperCase().includes("TL");
+}
 function fmtGs(n: number) {
   const sign = n < 0 ? "-" : "";
   return sign + "Gs. " + Math.round(Math.abs(n || 0)).toLocaleString("es-PY");
@@ -79,7 +85,7 @@ export default function ReconciliacionTLPage() {
     const endDate = `${year}-${String(month).padStart(2, "0")}-${endDay}`;
     const [viajesRes, pagosRes, recargasRes] = await Promise.all([
       supabase.from("viajes")
-        .select("*, cliente:cliente_id(nombre), vehiculo:vehiculo_id(alias, chapa), chofer:chofer_id(nombre_completo)")
+        .select("*, cliente:cliente_id(nombre), vehiculo:vehiculo_id(alias, chapa), chofer:chofer_id(nombre_completo), proveedor_combustible:proveedor_combustible_id(nombre)")
         .gte("fecha", startDate).lte("fecha", endDate)
         .order("fecha"),
       supabase.from("pagos_viatico")
@@ -87,7 +93,7 @@ export default function ReconciliacionTLPage() {
         .gte("semana_inicio", startDate).lte("semana_inicio", endDate)
         .order("fecha_pago"),
       supabase.from("recargas_combustible")
-        .select("*")
+        .select("*, proveedor:proveedor_id(nombre)")
         .gte("fecha", startDate).lte("fecha", endDate)
         .order("fecha"),
     ]);
@@ -99,11 +105,17 @@ export default function ReconciliacionTLPage() {
   useEffect(() => { loadData(); }, [year, month, quincena]);
   const debitos = useMemo(() => {
     const viajesConCamionPropio = viajes.filter(v => !v.vehiculo_externo_id);
-    const combustibleViajes = viajesConCamionPropio.reduce((s, v) => s + (v.costo_combustible || 0), 0);
-    const litrosViajes = viajesConCamionPropio.reduce((s, v) => s + (v.litros || 0), 0);
-    const combustibleRecargas = recargasCombustible.reduce((s, r) => s + (r.monto_total || 0), 0);
-    const litrosRecargas = recargasCombustible.reduce((s, r) => s + (r.litros || 0), 0);
-    const totalInsumosEstacion = viajesConCamionPropio.reduce((s, v) => s + (v.insumos_estacion_monto || 0), 0);
+    const viajesCombustibleDavid = viajesConCamionPropio.filter(
+      v => esProveedorDavid(v.proveedor_combustible?.nombre)
+    );
+    const combustibleViajes = viajesCombustibleDavid.reduce((s, v) => s + (v.costo_combustible || 0), 0);
+    const litrosViajes = viajesCombustibleDavid.reduce((s, v) => s + (v.litros || 0), 0);
+    const recargasDavid = recargasCombustible.filter(
+      r => esProveedorDavid(r.proveedor?.nombre)
+    );
+    const combustibleRecargas = recargasDavid.reduce((s, r) => s + (r.monto_total || 0), 0);
+    const litrosRecargas = recargasDavid.reduce((s, r) => s + (r.litros || 0), 0);
+    const totalInsumosEstacion = viajesCombustibleDavid.reduce((s, v) => s + (v.insumos_estacion_monto || 0), 0);
     const totalCombustible = combustibleViajes + combustibleRecargas + totalInsumosEstacion;
     const totalLitros = litrosViajes + litrosRecargas;
     const totalViatico = viajesConCamionPropio.reduce((s, v) => s + (v.viatico || 0), 0);
@@ -115,12 +127,12 @@ export default function ReconciliacionTLPage() {
     return {
       totalCombustible, totalLitros, combustibleViajes, litrosViajes, combustibleRecargas, litrosRecargas, totalInsumosEstacion,
       totalViatico, totalFletesConTL, totalComision, debeFletesTL, estadiasConCamionTL,
-      viajesConCamionPropio, viajesConCamionTL,
+      viajesConCamionPropio, viajesConCamionTL, viajesCombustibleDavid, recargasDavid,
       total: totalCombustible + totalViatico + debeFletesTL + estadiasConCamionTL,
     };
   }, [viajes, recargasCombustible]);
   const creditos = useMemo(() => {
-    const viajesParaTL = viajes.filter(v => 
+    const viajesParaTL = viajes.filter(v =>
       v.cliente?.nombre?.toUpperCase().includes("T&L") && !v.vehiculo_externo_id
     );
     const totalFletesParaTL = viajesParaTL.reduce((s, v) => s + (v.precio_flete || 0), 0);
@@ -151,7 +163,7 @@ export default function ReconciliacionTLPage() {
       }
       const [viajesRes, pagosRes, recargasRes] = await Promise.all([
         supabase.from("viajes")
-          .select("*, cliente:cliente_id(nombre), vehiculo:vehiculo_id(alias, chapa), chofer:chofer_id(nombre_completo)")
+          .select("*, cliente:cliente_id(nombre), vehiculo:vehiculo_id(alias, chapa), chofer:chofer_id(nombre_completo), proveedor_combustible:proveedor_combustible_id(nombre)")
           .gte("fecha", startDate).lte("fecha", endDate)
           .order("fecha"),
         supabase.from("pagos_viatico")
@@ -159,7 +171,7 @@ export default function ReconciliacionTLPage() {
           .gte("semana_inicio", startDate).lte("semana_inicio", endDate)
           .order("fecha_pago"),
         supabase.from("recargas_combustible")
-          .select("*")
+          .select("*, proveedor:proveedor_id(nombre)")
           .gte("fecha", startDate).lte("fecha", endDate)
           .order("fecha"),
       ]);
@@ -167,13 +179,17 @@ export default function ReconciliacionTLPage() {
       const ps = (pagosRes.data as unknown as PagoViatico[]) || [];
       const rs = (recargasRes.data as unknown as RecargaCombustible[]) || [];
       const vsPropio = vs.filter(v => !v.vehiculo_externo_id);
+      const vsPropioDavid = vsPropio.filter(v => esProveedorDavid(v.proveedor_combustible?.nombre));
+      const vsPropioOtros = vsPropio.filter(v => !esProveedorDavid(v.proveedor_combustible?.nombre));
+      const rsDavid = rs.filter(r => esProveedorDavid(r.proveedor?.nombre));
+      const rsOtros = rs.filter(r => !esProveedorDavid(r.proveedor?.nombre));
       const vsTL = vs.filter(v => v.vehiculo_externo_id === "TL");
       const vsParaTL = vs.filter(v => v.cliente?.nombre?.toUpperCase().includes("T&L") && !v.vehiculo_externo_id);
-      const combViajes = vsPropio.reduce((s, v) => s + (v.costo_combustible || 0), 0);
-      const litrosV = vsPropio.reduce((s, v) => s + (v.litros || 0), 0);
-      const combRec = rs.reduce((s, r) => s + (r.monto_total || 0), 0);
-      const litrosR = rs.reduce((s, r) => s + (r.litros || 0), 0);
-      const insumos = vsPropio.reduce((s, v) => s + (v.insumos_estacion_monto || 0), 0);
+      const combViajes = vsPropioDavid.reduce((s, v) => s + (v.costo_combustible || 0), 0);
+      const litrosV = vsPropioDavid.reduce((s, v) => s + (v.litros || 0), 0);
+      const combRec = rsDavid.reduce((s, r) => s + (r.monto_total || 0), 0);
+      const litrosR = rsDavid.reduce((s, r) => s + (r.litros || 0), 0);
+      const insumos = vsPropioDavid.reduce((s, v) => s + (v.insumos_estacion_monto || 0), 0);
       const totalComb = combViajes + combRec + insumos;
       const totalViat = vsPropio.reduce((s, v) => s + (v.viatico || 0), 0);
       const totalFletesTL = vsTL.reduce((s, v) => s + (v.precio_pagado_al_externo || v.precio_flete || 0), 0);
@@ -182,6 +198,8 @@ export default function ReconciliacionTLPage() {
       const totalFletesPara = vsParaTL.reduce((s, v) => s + (v.precio_flete || 0), 0);
       const estadiasPara = vsParaTL.reduce((s, v) => s + (v.ingresos_extras_monto || 0), 0);
       const totalPagosViat = ps.reduce((s, p) => s + (p.monto || 0), 0);
+      const combOtrosProveedores = vsPropioOtros.reduce((s, v) => s + (v.costo_combustible || 0), 0)
+        + rsOtros.reduce((s, r) => s + (r.monto_total || 0), 0);
       const totalDebo = totalComb + totalViat + totalFletesTL + estadiasTL;
       const totalMeDebe = totalFletesPara + totalCom + totalPagosViat + estadiasPara;
       const netoFinal = totalDebo - totalMeDebe;
@@ -189,16 +207,19 @@ export default function ReconciliacionTLPage() {
       const resumen = [
         ["RECONCILIACIÓN CON DAVID (TL)"],
         [tituloRango],
+        ["Solo combustible/insumos cargados en Petrobras Ypane / TL cuentan al débito."],
         [""],
         ["YO LE DEBO A DAVID", "", "Monto (Gs.)"],
         ["Combustible (viajes + recargas + insumos)", "", totalComb],
-        ["  · En viajes propios", `${litrosV} lts`, combViajes],
-        ["  · Recargas sueltas", `${litrosR} lts`, combRec],
-        ["  · Insumos extra estación", "", insumos],
+        ["  · En viajes propios (solo TL)", `${litrosV} lts`, combViajes],
+        ["  · Recargas sueltas (solo TL)", `${litrosR} lts`, combRec],
+        ["  · Insumos extra estación (solo TL)", "", insumos],
         ["Viáticos", "", totalViat],
         ["Fletes con camión TL", `${vsTL.length} viajes`, totalFletesTL],
         ["Estadías con camión TL (100%)", "", estadiasTL],
         ["TOTAL DEBO", "", totalDebo],
+        [""],
+        ["INFO: Combustible en otros proveedores (NO cuenta con David)", "", combOtrosProveedores],
         [""],
         ["DAVID ME DEBE", "", "Monto (Gs.)"],
         ["Fletes hechos para TL", `${vsParaTL.length} viajes`, totalFletesPara],
@@ -213,40 +234,50 @@ export default function ReconciliacionTLPage() {
         [netoFinal >= 0 ? "YO LE PAGO A DAVID" : "DAVID ME PAGA A MÍ", "", Math.abs(netoFinal)],
       ];
       const ws1 = XLSX.utils.aoa_to_sheet(resumen);
-      ws1["!cols"] = [{ wch: 40 }, { wch: 15 }, { wch: 18 }];
+      ws1["!cols"] = [{ wch: 45 }, { wch: 15 }, { wch: 18 }];
       XLSX.utils.book_append_sheet(wb, ws1, "Resumen");
       if (vsPropio.length > 0) {
         const comb = [
-          ["Fecha", "Chofer", "Cliente", "Ruta", "Litros", "Gs/Litro", "Costo Total"],
-          ...vsPropio.map(v => [
-            fmtFechaFull(v.fecha),
-            v.chofer?.nombre_completo || "-",
-            v.cliente?.nombre || "-",
-            `${v.origen} → ${v.destino}`,
-            v.litros || 0,
-            v.gs_por_litro || 0,
-            v.costo_combustible || 0,
-          ]),
-          ["", "", "", "TOTAL", litrosV, "", combViajes],
+          ["Fecha", "Chofer", "Cliente", "Ruta", "Proveedor", "Cuenta con David?", "Litros", "Gs/Litro", "Costo Total"],
+          ...vsPropio.map(v => {
+            const esDavid = esProveedorDavid(v.proveedor_combustible?.nombre);
+            return [
+              fmtFechaFull(v.fecha),
+              v.chofer?.nombre_completo || "-",
+              v.cliente?.nombre || "-",
+              `${v.origen} → ${v.destino}`,
+              v.proveedor_combustible?.nombre || "(sin proveedor)",
+              esDavid ? "SÍ" : "NO",
+              v.litros || 0,
+              v.gs_por_litro || 0,
+              v.costo_combustible || 0,
+            ];
+          }),
+          ["", "", "", "", "", "TOTAL solo David", litrosV, "", combViajes],
         ];
         const ws = XLSX.utils.aoa_to_sheet(comb);
-        ws["!cols"] = [{ wch: 12 }, { wch: 22 }, { wch: 30 }, { wch: 30 }, { wch: 10 }, { wch: 12 }, { wch: 16 }];
+        ws["!cols"] = [{ wch: 12 }, { wch: 22 }, { wch: 30 }, { wch: 30 }, { wch: 26 }, { wch: 16 }, { wch: 10 }, { wch: 12 }, { wch: 16 }];
         XLSX.utils.book_append_sheet(wb, ws, "Combustible viajes");
       }
       if (rs.length > 0) {
         const rec = [
-          ["Fecha", "Litros", "Gs/Litro", "Total", "Observación"],
-          ...rs.map(r => [
-            fmtFechaFull(r.fecha),
-            r.litros || 0,
-            r.gs_por_litro || 0,
-            r.monto_total || 0,
-            r.observacion || "-",
-          ]),
-          ["TOTAL", litrosR, "", combRec, ""],
+          ["Fecha", "Proveedor", "Cuenta con David?", "Litros", "Gs/Litro", "Total", "Observación"],
+          ...rs.map(r => {
+            const esDavid = esProveedorDavid(r.proveedor?.nombre);
+            return [
+              fmtFechaFull(r.fecha),
+              r.proveedor?.nombre || "(sin proveedor)",
+              esDavid ? "SÍ" : "NO",
+              r.litros || 0,
+              r.gs_por_litro || 0,
+              r.monto_total || 0,
+              r.observacion || "-",
+            ];
+          }),
+          ["TOTAL solo David", "", "", litrosR, "", combRec, ""],
         ];
         const ws = XLSX.utils.aoa_to_sheet(rec);
-        ws["!cols"] = [{ wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 16 }, { wch: 40 }];
+        ws["!cols"] = [{ wch: 12 }, { wch: 26 }, { wch: 16 }, { wch: 10 }, { wch: 12 }, { wch: 16 }, { wch: 40 }];
         XLSX.utils.book_append_sheet(wb, ws, "Recargas sueltas");
       }
       const vsConViatico = vsPropio.filter(v => (v.viatico || 0) > 0);
@@ -266,7 +297,7 @@ export default function ReconciliacionTLPage() {
         ws["!cols"] = [{ wch: 12 }, { wch: 22 }, { wch: 30 }, { wch: 30 }, { wch: 16 }];
         XLSX.utils.book_append_sheet(wb, ws, "Viáticos");
       }
-      const vsConInsumos = vsPropio.filter(v => (v.insumos_estacion_monto || 0) > 0);
+      const vsConInsumos = vsPropioDavid.filter(v => (v.insumos_estacion_monto || 0) > 0);
       if (vsConInsumos.length > 0) {
         const ins = [
           ["Fecha", "Chofer", "Cliente", "Descripción", "Monto"],
@@ -403,7 +434,7 @@ export default function ReconciliacionTLPage() {
           <div>
             <div className="font-bold mb-1">💸 YO LE DEBO A DAVID:</div>
             <ul className="space-y-0.5">
-              <li>⛽ Combustible (viajes + recargas sueltas + insumos)</li>
+              <li>⛽ Combustible <b>SOLO en Petrobras Ypane / TL</b> (viajes + recargas + insumos)</li>
               <li>💵 Viáticos que retiré (según ruta)</li>
               <li>🚛 Fletes con SUS camiones (flete completo)</li>
               <li>🕐 Estadías con SUS camiones (100%, sin comisión)</li>
@@ -420,6 +451,7 @@ export default function ReconciliacionTLPage() {
           </div>
         </div>
         <div className="text-xs text-yellow-900 mt-2 font-bold">🎯 NETEO = DEBO − ME DEBE. Positivo = yo pago. Negativo = él paga.</div>
+        <div className="text-[11px] text-yellow-800 mt-1 italic">⚠️ Combustible cargado en OTROS proveedores (CM Group, Copasa, etc.) NO entra acá — ya lo pagás por tu cuenta y va a Gastos.</div>
       </div>
       {loading ? (
         <div className="p-16 text-center text-teus-text_muted">
@@ -437,7 +469,7 @@ export default function ReconciliacionTLPage() {
                 <div className="bg-white rounded-lg p-3 border border-red-200">
                   <div className="flex justify-between items-baseline">
                     <div>
-                      <div className="text-xs uppercase font-bold text-red-700">⛽ Combustible</div>
+                      <div className="text-xs uppercase font-bold text-red-700">⛽ Combustible (solo Petrobras/TL)</div>
                       <div className="text-[10px] text-red-600 mt-0.5">{debitos.totalLitros.toLocaleString("es-PY")} lts · {debitos.litrosViajes.toLocaleString("es-PY")} en viajes + {debitos.litrosRecargas.toLocaleString("es-PY")} en recargas{debitos.totalInsumosEstacion > 0 ? ` + ${fmtGs(debitos.totalInsumosEstacion)} en insumos` : ""}</div>
                     </div>
                     <div className="text-lg font-black text-red-900">{fmtGs(debitos.totalCombustible)}</div>
@@ -550,7 +582,7 @@ export default function ReconciliacionTLPage() {
           </div>
           <details className="bg-teus-card_light border border-teus-border_light rounded-xl mb-4 shadow-card">
             <summary className="cursor-pointer px-5 py-3 font-bold text-teus-text_dark hover:bg-teus-bg_soft">
-              📋 Detalle: {debitos.viajesConCamionPropio.length} viajes con camión propio (para combustible/viático)
+              📋 Detalle: {debitos.viajesConCamionPropio.length} viajes con camión propio (los NO-TL están en gris — no cuentan con David)
             </summary>
             <div className="overflow-x-auto p-3">
               <table className="w-full text-xs">
@@ -560,6 +592,7 @@ export default function ReconciliacionTLPage() {
                     <th className="text-left p-2">Cliente</th>
                     <th className="text-left p-2">Ruta</th>
                     <th className="text-left p-2">Chofer</th>
+                    <th className="text-left p-2">Proveedor combustible</th>
                     <th className="text-right p-2">Litros</th>
                     <th className="text-right p-2">Combustible</th>
                     <th className="text-right p-2">Viático</th>
@@ -567,18 +600,27 @@ export default function ReconciliacionTLPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {debitos.viajesConCamionPropio.map(v => (
-                    <tr key={v.id} className="border-t border-teus-border_light">
-                      <td className="p-2">{fmtFecha(v.fecha)}</td>
-                      <td className="p-2">{v.cliente?.nombre || "-"}</td>
-                      <td className="p-2">{v.origen}→{v.destino}</td>
-                      <td className="p-2 font-semibold">{v.chofer?.nombre_completo || "-"}</td>
-                      <td className="p-2 text-right">{v.litros}</td>
-                      <td className="p-2 text-right text-red-600 font-bold">{fmtGs(v.costo_combustible)}</td>
-                      <td className="p-2 text-right text-red-600 font-bold">{fmtGs(v.viatico)}</td>
-                      <td className="p-2 text-right text-red-600 font-bold">{fmtGs(v.insumos_estacion_monto || 0)}</td>
-                    </tr>
-                  ))}
+                  {debitos.viajesConCamionPropio.map(v => {
+                    const esDavid = esProveedorDavid(v.proveedor_combustible?.nombre);
+                    const rowClass = esDavid ? "" : "opacity-50";
+                    const costClass = esDavid ? "text-red-600 font-bold" : "text-gray-400 line-through";
+                    return (
+                      <tr key={v.id} className={`border-t border-teus-border_light ${rowClass}`}>
+                        <td className="p-2">{fmtFecha(v.fecha)}</td>
+                        <td className="p-2">{v.cliente?.nombre || "-"}</td>
+                        <td className="p-2">{v.origen}→{v.destino}</td>
+                        <td className="p-2 font-semibold">{v.chofer?.nombre_completo || "-"}</td>
+                        <td className="p-2">
+                          {v.proveedor_combustible?.nombre || <span className="text-gray-400">(sin proveedor)</span>}
+                          {esDavid && <span className="ml-1 text-[10px] bg-red-100 text-red-700 px-1 rounded font-bold">TL</span>}
+                        </td>
+                        <td className="p-2 text-right">{v.litros}</td>
+                        <td className={`p-2 text-right ${costClass}`}>{fmtGs(v.costo_combustible)}</td>
+                        <td className="p-2 text-right text-red-600 font-bold">{fmtGs(v.viatico)}</td>
+                        <td className={`p-2 text-right ${costClass}`}>{fmtGs(v.insumos_estacion_monto || 0)}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -586,13 +628,14 @@ export default function ReconciliacionTLPage() {
           {recargasCombustible.length > 0 && (
             <details className="bg-teus-card_light border border-teus-border_light rounded-xl mb-4 shadow-card">
               <summary className="cursor-pointer px-5 py-3 font-bold text-teus-text_dark hover:bg-teus-bg_soft">
-                ⛽ Detalle: {recargasCombustible.length} recargas de combustible sueltas (esta quincena)
+                ⛽ Detalle: {recargasCombustible.length} recargas de combustible sueltas (los NO-TL están en gris)
               </summary>
               <div className="overflow-x-auto p-3">
                 <table className="w-full text-xs">
                   <thead className="bg-teus-bg_soft">
                     <tr>
                       <th className="text-left p-2">Fecha</th>
+                      <th className="text-left p-2">Proveedor</th>
                       <th className="text-left p-2">Observación</th>
                       <th className="text-right p-2">Litros</th>
                       <th className="text-right p-2">Gs/L</th>
@@ -600,15 +643,24 @@ export default function ReconciliacionTLPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {recargasCombustible.map(r => (
-                      <tr key={r.id} className="border-t border-teus-border_light">
-                        <td className="p-2">{fmtFecha(r.fecha)}</td>
-                        <td className="p-2">{r.observacion || "-"}</td>
-                        <td className="p-2 text-right">{r.litros}</td>
-                        <td className="p-2 text-right">{fmtGs(r.gs_por_litro)}</td>
-                        <td className="p-2 text-right font-bold text-red-600">{fmtGs(r.monto_total)}</td>
-                      </tr>
-                    ))}
+                    {recargasCombustible.map(r => {
+                      const esDavid = esProveedorDavid(r.proveedor?.nombre);
+                      const rowClass = esDavid ? "" : "opacity-50";
+                      const costClass = esDavid ? "text-red-600 font-bold" : "text-gray-400 line-through";
+                      return (
+                        <tr key={r.id} className={`border-t border-teus-border_light ${rowClass}`}>
+                          <td className="p-2">{fmtFecha(r.fecha)}</td>
+                          <td className="p-2">
+                            {r.proveedor?.nombre || <span className="text-gray-400">(sin proveedor)</span>}
+                            {esDavid && <span className="ml-1 text-[10px] bg-red-100 text-red-700 px-1 rounded font-bold">TL</span>}
+                          </td>
+                          <td className="p-2">{r.observacion || "-"}</td>
+                          <td className="p-2 text-right">{r.litros}</td>
+                          <td className="p-2 text-right">{fmtGs(r.gs_por_litro)}</td>
+                          <td className={`p-2 text-right ${costClass}`}>{fmtGs(r.monto_total)}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
