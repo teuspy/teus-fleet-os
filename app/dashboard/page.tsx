@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Truck, Users, Building2, MapPin, TrendingUp, ArrowUpRight, ClipboardList, DollarSign, Wallet, Calendar, Loader2 } from "lucide-react";
+import { Truck, Users, Building2, MapPin, TrendingUp, ArrowUpRight, ClipboardList, DollarSign, Wallet, Calendar, Loader2, Fuel } from "lucide-react";
 import Link from "next/link";
 
 function fmtGs(n: number) {
@@ -29,6 +29,7 @@ export default function DashboardPage() {
     totalGastosFijosEquipos: 0,
     totalGastosFijosOficina: 0,
     totalGastosFlota: 0,
+    totalRecargasSueltas: 0,
     totalViajesMes: 0,
     facturacionMes: 0,
     utilidadBrutaMes: 0,
@@ -51,6 +52,7 @@ export default function DashboardPage() {
       { data: vehiculos },
       { data: viajesMes },
       { data: gastosMes },
+      { data: recargasMes },
     ] = await Promise.all([
       supabase.from("vehiculos").select("*", { count: "exact", head: true }).eq("activo", true),
       supabase.from("choferes").select("*", { count: "exact", head: true }).eq("activo", true),
@@ -60,17 +62,18 @@ export default function DashboardPage() {
       supabase.from("vehiculos").select("*").eq("activo", true).eq("tipo", "tracto"),
       supabase.from("viajes").select("vehiculo_id, precio_flete, utilidad_bruta, km_viaje").gte("fecha", startDate).lte("fecha", endDate),
       supabase.from("gastos").select("monto, vehiculo:vehiculo_id(alias)").gte("fecha", startDate).lte("fecha", endDate),
+      supabase.from("recargas_combustible").select("monto_total, vehiculo_id, vehiculo:vehiculo_id(alias)").gte("fecha", startDate).lte("fecha", endDate),
     ]);
 
     const gfEquipos = (gastosFijos || []).filter((g: any) => g.aplica_a === "equipos").reduce((s, g: any) => s + (g.monto_mensual || 0), 0);
     const gfOficina = (gastosFijos || []).filter((g: any) => g.aplica_a === "oficina").reduce((s, g: any) => s + (g.monto_mensual || 0), 0);
     const totalGastosFlota = (gastosMes || []).reduce((s, g: any) => s + (g.monto || 0), 0);
+    const totalRecargasSueltas = (recargasMes || []).reduce((s, r: any) => s + (r.monto_total || 0), 0);
     const totalViajesMes = viajesMes?.length || 0;
     const facturacionMes = (viajesMes || []).reduce((s, v: any) => s + (v.precio_flete || 0), 0);
     const utilidadBrutaMes = (viajesMes || []).reduce((s, v: any) => s + (v.utilidad_bruta || 0), 0);
     const kmMes = (viajesMes || []).reduce((s, v: any) => s + (v.km_viaje || 0), 0);
 
-    // Stats por equipo (tractocamión)
     const tractos = vehiculos || [];
     const numEquipos = tractos.length || 1;
     const fijoPorEquipo = gfEquipos / numEquipos;
@@ -82,14 +85,15 @@ export default function DashboardPage() {
       const utilidadBrutaViajes = viajesEquipo.reduce((s: number, vj: any) => s + (vj.utilidad_bruta || 0), 0);
       const km = viajesEquipo.reduce((s: number, vj: any) => s + (vj.km_viaje || 0), 0);
       const gastoFlota = (gastosMes || []).filter((g: any) => g.vehiculo?.alias === v.alias).reduce((s: number, g: any) => s + (g.monto || 0), 0);
-      const utilidadBruta = utilidadBrutaViajes - gastoFlota;
+      const recargasEquipo = (recargasMes || []).filter((r: any) => r.vehiculo_id === v.id).reduce((s: number, r: any) => s + (r.monto_total || 0), 0);
+      const utilidadBruta = utilidadBrutaViajes - gastoFlota - recargasEquipo;
       const utilidadNeta = utilidadBruta - fijoPorEquipo;
       statsPorEquipo[v.id] = {
         viajes: viajesEquipo.length,
         km,
         facturacion,
         utilidadBruta,
-        gastoFlota,
+        gastoFlota: gastoFlota + recargasEquipo,
         utilidadNeta,
       };
     });
@@ -102,6 +106,7 @@ export default function DashboardPage() {
       totalGastosFijosEquipos: gfEquipos,
       totalGastosFijosOficina: gfOficina,
       totalGastosFlota,
+      totalRecargasSueltas,
       totalViajesMes,
       facturacionMes,
       utilidadBrutaMes,
@@ -115,7 +120,7 @@ export default function DashboardPage() {
   useEffect(() => { loadData(); }, [year, month]);
 
   const totalGastosFijos = data.totalGastosFijosEquipos + data.totalGastosFijosOficina;
-  const utilidadNeta = data.utilidadBrutaMes - data.totalGastosFlota - totalGastosFijos;
+  const utilidadNeta = data.utilidadBrutaMes - data.totalGastosFlota - data.totalRecargasSueltas - totalGastosFijos;
   const margenBruto = data.facturacionMes ? (data.utilidadBrutaMes / data.facturacionMes) * 100 : 0;
   const margenNeto = data.facturacionMes ? (utilidadNeta / data.facturacionMes) * 100 : 0;
   const breakEven = data.facturacionMes > 0 && data.totalViajesMes > 0 ? Math.ceil(totalGastosFijos / (data.facturacionMes / data.totalViajesMes)) : 0;
@@ -191,11 +196,11 @@ export default function DashboardPage() {
             <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${utilidadNeta >= 0 ? "bg-teus-accent" : "bg-teus-danger"}`}><Wallet className="w-5 h-5 text-white" /></div>
           </div>
           <div className={`text-2xl font-black tracking-tight ${utilidadNeta >= 0 ? "text-teus-text_dark" : "text-teus-danger"}`}>{fmtGs(utilidadNeta)}</div>
-          <div className="text-[10px] text-teus-text_soft mt-1">Bruta − Gastos flota − Gastos fijos ({margenNeto.toFixed(1)}%)</div>
+          <div className="text-[10px] text-teus-text_soft mt-1">Bruta − Gastos flota − Recargas − Gastos fijos ({margenNeto.toFixed(1)}%)</div>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4 mb-6">
+      <div className="grid grid-cols-3 gap-4 mb-6">
         <div className="bg-gradient-to-br from-teus-accent/10 to-green-100 border border-teus-accent/30 rounded-2xl p-5 shadow-card">
           <div className="text-[11px] text-teus-accent-dark uppercase tracking-[2px] font-black flex items-center gap-2">
             <Truck className="w-4 h-4" /> Gastos Fijos EQUIPOS
@@ -211,6 +216,15 @@ export default function DashboardPage() {
           </div>
           <div className="text-3xl font-black mt-2 text-teus-text_dark">{fmtGs(data.totalGastosFijosOficina)}</div>
           <div className="text-xs text-teus-text_muted mt-1">NO se prorratea a equipos, sí afecta utilidad empresa</div>
+        </div>
+        <div className="bg-gradient-to-br from-amber-100 to-orange-200 border border-amber-400 rounded-2xl p-5 shadow-card">
+          <div className="text-[11px] text-amber-900 uppercase tracking-[2px] font-black flex items-center gap-2">
+            <Fuel className="w-4 h-4" /> Recargas de combustible
+          </div>
+          <div className="text-3xl font-black mt-2 text-teus-text_dark">{fmtGs(data.totalRecargasSueltas)}</div>
+          <div className="text-xs text-teus-text_muted mt-1">
+            Recargas sueltas del mes (impactan utilidad neta)
+          </div>
         </div>
       </div>
 
