@@ -68,6 +68,7 @@ const navSections = [
     title: "Sistema",
     items: [
       { href: "/reconciliacion-tl", label: "Reconciliación TL", icon: Wallet },
+      { href: "/combustible", label: "Combustible", icon: Fuel },
       { href: "/cheques", label: "Cheques Emitidos", icon: CheckSquare },
       { href: "/gastos-fijos", label: "Gastos Fijos", icon: DollarSign },
       { href: "/alertas", label: "Alertas", icon: Bell },
