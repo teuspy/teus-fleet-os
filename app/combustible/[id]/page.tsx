@@ -25,6 +25,7 @@ type ViajeItem = {
   destino: string;
   chofer?: { nombre_completo: string } | null;
   cliente?: { nombre: string } | null;
+  vehiculo?: { alias: string | null; chapa: string } | null;
 };
 
 type RecargaItem = {
@@ -34,6 +35,7 @@ type RecargaItem = {
   gs_por_litro: number;
   monto_total: number;
   observacion: string | null;
+  vehiculo?: { alias: string | null; chapa: string } | null;
 };
 
 function fmtGs(n: number) {
@@ -48,6 +50,13 @@ function toISODate(d: Date): string {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
+}
+function fmtVehiculo(v?: { alias: string | null; chapa: string } | null): string {
+  if (!v) return "-";
+  const alias = v.alias || "";
+  const chapa = v.chapa || "";
+  if (alias && chapa) return `${alias} · ${chapa}`;
+  return alias || chapa || "-";
 }
 
 export default function ArregloProveedorPage() {
@@ -78,13 +87,13 @@ export default function ArregloProveedorPage() {
     const [provRes, viajesRes, recargasRes] = await Promise.all([
       supabase.from("proveedores").select("*").eq("id", proveedorId).single(),
       supabase.from("viajes")
-        .select("id, fecha, litros, gs_por_litro, costo_combustible, insumos_estacion_monto, insumos_estacion_detalle, origen, destino, chofer:chofer_id(nombre_completo), cliente:cliente_id(nombre)")
+        .select("id, fecha, litros, gs_por_litro, costo_combustible, insumos_estacion_monto, insumos_estacion_detalle, origen, destino, chofer:chofer_id(nombre_completo), cliente:cliente_id(nombre), vehiculo:vehiculo_id(alias, chapa)")
         .eq("proveedor_combustible_id", proveedorId)
         .is("arreglo_combustible_id", null)
         .is("vehiculo_externo_id", null)
         .order("fecha"),
       supabase.from("recargas_combustible")
-        .select("id, fecha, litros, gs_por_litro, monto_total, observacion")
+        .select("id, fecha, litros, gs_por_litro, monto_total, observacion, vehiculo:vehiculo_id(alias, chapa)")
         .eq("proveedor_id", proveedorId)
         .is("arreglo_combustible_id", null)
         .order("fecha"),
@@ -228,6 +237,7 @@ export default function ArregloProveedorPage() {
     viajesEnRango.forEach(v => items.push({
       tipo: "Viaje",
       fecha: v.fecha,
+      vehiculo: fmtVehiculo(v.vehiculo),
       chofer: v.chofer?.nombre_completo || "-",
       detalle: `${v.origen} → ${v.destino}`,
       litros: v.litros || 0,
@@ -239,6 +249,7 @@ export default function ArregloProveedorPage() {
     recargasEnRango.forEach(r => items.push({
       tipo: "Recarga suelta",
       fecha: r.fecha,
+      vehiculo: fmtVehiculo(r.vehiculo),
       chofer: "-",
       detalle: r.observacion || "-",
       litros: r.litros || 0,
@@ -250,16 +261,16 @@ export default function ArregloProveedorPage() {
     items.sort((a, b) => a.fecha.localeCompare(b.fecha));
 
     const detalle = [
-      ["Fecha", "Tipo", "Chofer", "Detalle", "Litros", "Gs/L", "Combustible", "Insumos", "TOTAL"],
+      ["Fecha", "Tipo", "Vehículo", "Chofer", "Detalle", "Litros", "Gs/L", "Combustible", "Insumos", "TOTAL"],
       ...items.map(i => [
-        fmtFecha(i.fecha), i.tipo, i.chofer, i.detalle,
+        fmtFecha(i.fecha), i.tipo, i.vehiculo, i.chofer, i.detalle,
         i.litros, i.gsL, i.combustible, i.insumos, i.total,
       ]),
       [],
-      ["", "", "", "TOTALES", totalLitros, Math.round(promedioGsL), totalCombustible, totalInsumos, totalGeneral],
+      ["", "", "", "", "TOTALES", totalLitros, Math.round(promedioGsL), totalCombustible, totalInsumos, totalGeneral],
     ];
     const ws2 = XLSX.utils.aoa_to_sheet(detalle);
-    ws2["!cols"] = [{ wch: 12 }, { wch: 14 }, { wch: 22 }, { wch: 30 }, { wch: 10 }, { wch: 12 }, { wch: 16 }, { wch: 14 }, { wch: 16 }];
+    ws2["!cols"] = [{ wch: 12 }, { wch: 14 }, { wch: 22 }, { wch: 22 }, { wch: 30 }, { wch: 10 }, { wch: 12 }, { wch: 16 }, { wch: 14 }, { wch: 16 }];
     XLSX.utils.book_append_sheet(wb, ws2, "Detalle");
 
     const fname = `Arreglo-${nombreProv.replace(/[^a-zA-Z0-9]/g, "_")}-${desde}-al-${hasta}.xlsx`;
@@ -365,6 +376,7 @@ export default function ArregloProveedorPage() {
                 <tr>
                   <th className="text-left p-3 font-bold">Fecha</th>
                   <th className="text-left p-3 font-bold">Tipo</th>
+                  <th className="text-left p-3 font-bold">Vehículo</th>
                   <th className="text-left p-3 font-bold">Chofer / Detalle</th>
                   <th className="text-right p-3 font-bold">Litros</th>
                   <th className="text-right p-3 font-bold">Gs/L</th>
@@ -377,6 +389,7 @@ export default function ArregloProveedorPage() {
                 {[
                   ...viajesEnRango.map(v => ({
                     id: v.id, tipo: "viaje" as const, fecha: v.fecha,
+                    vehiculo: v.vehiculo,
                     chofer: v.chofer?.nombre_completo || "-",
                     litros: v.litros || 0,
                     gsL: v.gs_por_litro || 0,
@@ -386,6 +399,7 @@ export default function ArregloProveedorPage() {
                   })),
                   ...recargasEnRango.map(r => ({
                     id: r.id, tipo: "recarga" as const, fecha: r.fecha,
+                    vehiculo: r.vehiculo,
                     chofer: r.observacion || "recarga suelta",
                     litros: r.litros || 0,
                     gsL: r.gs_por_litro || 0,
@@ -405,6 +419,16 @@ export default function ArregloProveedorPage() {
                           <span className="text-[10px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded font-bold">RECARGA</span>
                         )}
                       </td>
+                      <td className="p-3">
+                        {i.vehiculo ? (
+                          <div>
+                            <div className="font-bold text-teus-text_dark">{i.vehiculo.alias || "-"}</div>
+                            <div className="text-[10px] font-mono text-teus-text_muted">{i.vehiculo.chapa || ""}</div>
+                          </div>
+                        ) : (
+                          <span className="text-teus-text_muted">-</span>
+                        )}
+                      </td>
                       <td className="p-3 font-semibold">{i.chofer}</td>
                       <td className="p-3 text-right">{i.litros}</td>
                       <td className="p-3 text-right">{fmtGs(i.gsL)}</td>
@@ -416,7 +440,7 @@ export default function ArregloProveedorPage() {
               </tbody>
               <tfoot className="bg-amber-100 border-t-2 border-amber-400">
                 <tr>
-                  <td colSpan={3} className="p-3 text-right font-black text-amber-900">TOTALES</td>
+                  <td colSpan={4} className="p-3 text-right font-black text-amber-900">TOTALES</td>
                   <td className="p-3 text-right font-black text-amber-900">{totalLitros}</td>
                   <td className="p-3 text-right font-black text-amber-900">{fmtGs(promedioGsL)}</td>
                   <td className="p-3 text-right font-black text-amber-900">{fmtGs(totalCombustible)}</td>
