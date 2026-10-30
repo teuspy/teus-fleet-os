@@ -24,6 +24,7 @@ import {
   Medal,
   Wallet,
   CheckSquare,
+  Route,
 } from "lucide-react";
 
 const navSections = [
@@ -31,6 +32,7 @@ const navSections = [
     title: "Principal",
     items: [
       { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+      { href: "/hojas-de-ruta", label: "Hojas de ruta", icon: Route },
       { href: "/viajes", label: "Producción / Viajes", icon: ClipboardList },
       { href: "/gastos", label: "Gastos de Flota", icon: DollarSign },
       { href: "/facturas", label: "Facturas y Cobros", icon: FileText },
