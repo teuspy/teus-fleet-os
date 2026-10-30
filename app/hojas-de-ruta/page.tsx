@@ -33,7 +33,7 @@ type HojaRuta = {
 };
 
 const TIPOS_CONTENEDOR = ["DRY 20'", "DRY 40'", "DRY 40' HC", "Reefer 20'", "Reefer 40'", "Open Top", "Flat Rack", "Carga suelta"];
-const TERMINALES = ["TERPORT - Villeta", "PSF - Puerto San Francisco", "CAACUPEMI", "FENIX", "SAN JOSE", "Otro"];
+const TERMINALES = ["TERPORT - Villeta", "PSF - Puerto Seguro Fluvial", "CAACUPEMI", "FENIX", "SAN JOSE", "Otro"];
 
 const ESTADOS: Record<string, { label: string; bg: string; text: string }> = {
   emitida: { label: "Emitida", bg: "bg-green-100", text: "text-green-800" },
