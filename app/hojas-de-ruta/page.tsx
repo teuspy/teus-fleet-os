@@ -1,10 +1,10 @@
 "use client";
 import { useEffect, useState, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { ClipboardList, Plus, Download, Edit, X, Loader2, Search, Trash2, ChevronDown, ChevronUp } from "lucide-react";
+import { ClipboardList, Plus, Download, Edit, X, Loader2, Search, Trash2, ChevronDown, ChevronUp, MessageCircle } from "lucide-react";
 import jsPDF from "jspdf";
 
-type Chofer = { id: string; nombre_completo: string };
+type Chofer = { id: string; nombre_completo: string; telefono: string | null };
 type Vehiculo = { id: string; alias: string | null; chapa: string };
 type Cliente = { id: string; nombre: string };
 
@@ -15,11 +15,15 @@ type HojaRuta = {
   chofer_id: string | null;
   vehiculo_id: string | null;
   cliente_id: string | null;
+  chofer_externo_nombre: string | null;
+  chofer_externo_telefono: string | null;
+  equipo_externo: string | null;
   tipo_contenedor: string | null;
   nro_contenedor: string | null;
-  booking_referencia: string | null;
+  tipo_operacion: string | null;
   peso_kg: number | null;
   retiro_lugar: string | null;
+  retiro_fecha: string | null;
   entrega_direccion: string | null;
   entrega_fecha: string | null;
   entrega_hora: string | null;
@@ -27,13 +31,14 @@ type HojaRuta = {
   devolucion_fecha: string | null;
   instrucciones: string | null;
   estado: string;
-  chofer?: { nombre_completo: string } | null;
+  chofer?: { nombre_completo: string; telefono: string | null } | null;
   vehiculo?: { alias: string | null; chapa: string } | null;
   cliente?: { nombre: string } | null;
 };
 
 const TIPOS_CONTENEDOR = ["DRY 20'", "DRY 40'", "DRY 40' HC", "Reefer 20'", "Reefer 40'", "Open Top", "Flat Rack", "Carga suelta"];
 const TERMINALES = ["TERPORT - Villeta", "PSF - Puerto Seguro Fluvial", "CAACUPEMI", "FENIX", "SAN JOSE", "Otro"];
+const CHOFER_EXTERNO_VALUE = "__externo__";
 
 const ESTADOS: Record<string, { label: string; bg: string; text: string }> = {
   emitida: { label: "Emitida", bg: "bg-green-100", text: "text-green-800" },
@@ -56,6 +61,19 @@ function fmtHora(h: string | null): string {
   if (!h) return "";
   return h.substring(0, 5);
 }
+function phoneForWhatsApp(phone: string | null | undefined): string | null {
+  if (!phone) return null;
+  let clean = phone.replace(/[^\d]/g, "");
+  if (clean.startsWith("0")) clean = clean.substring(1);
+  if (!clean.startsWith("595")) clean = "595" + clean;
+  if (clean.length < 10) return null;
+  return clean;
+}
+function labelDescargaCarga(tipo: string | null): string {
+  if (tipo === "import") return "DESCARGA";
+  if (tipo === "export") return "CARGA";
+  return "DESCARGA / CARGA";
+}
 
 export default function HojasDeRutaPage() {
   const supabase = createClient();
@@ -68,19 +86,23 @@ export default function HojasDeRutaPage() {
   const [editando, setEditando] = useState<HojaRuta | null>(null);
   const [guardando, setGuardando] = useState(false);
   const [showOpcionales, setShowOpcionales] = useState(false);
-
   const [filtroEstado, setFiltroEstado] = useState("todos");
   const [busqueda, setBusqueda] = useState("");
+  const [proximoNumero, setProximoNumero] = useState<string>("");
 
   const [form, setForm] = useState({
+    cliente_id: "",
     chofer_id: "",
     vehiculo_id: "",
-    cliente_id: "",
+    chofer_externo_nombre: "",
+    chofer_externo_telefono: "",
+    equipo_externo: "",
     tipo_contenedor: "",
+    tipo_operacion: "",
     nro_contenedor: "",
-    booking_referencia: "",
     peso_kg: "",
     retiro_lugar: "",
+    retiro_fecha: "",
     entrega_direccion: "",
     entrega_fecha: "",
     entrega_hora: "",
@@ -89,15 +111,15 @@ export default function HojasDeRutaPage() {
     instrucciones: "",
   });
 
-  const [proximoNumero, setProximoNumero] = useState<string>("");
+  const esChoferExterno = form.chofer_id === CHOFER_EXTERNO_VALUE;
 
   async function loadData() {
     setLoading(true);
     const [hojasRes, choferesRes, vehiculosRes, clientesRes] = await Promise.all([
       supabase.from("hojas_de_ruta")
-        .select("*, chofer:chofer_id(nombre_completo), vehiculo:vehiculo_id(alias, chapa), cliente:cliente_id(nombre)")
+        .select("*, chofer:chofer_id(nombre_completo, telefono), vehiculo:vehiculo_id(alias, chapa), cliente:cliente_id(nombre)")
         .order("created_at", { ascending: false }),
-      supabase.from("choferes").select("id, nombre_completo").eq("activo", true).order("nombre_completo"),
+      supabase.from("choferes").select("id, nombre_completo, telefono").eq("activo", true).order("nombre_completo"),
       supabase.from("vehiculos").select("id, alias, chapa").eq("activo", true).eq("tipo", "tracto").order("alias"),
       supabase.from("clientes").select("id, nombre").eq("activo", true).order("nombre"),
     ]);
@@ -117,9 +139,11 @@ export default function HojasDeRutaPage() {
 
   function resetForm() {
     setForm({
-      chofer_id: "", vehiculo_id: "", cliente_id: "", tipo_contenedor: "",
-      nro_contenedor: "", booking_referencia: "", peso_kg: "",
-      retiro_lugar: "", entrega_direccion: "", entrega_fecha: "", entrega_hora: "",
+      cliente_id: "", chofer_id: "", vehiculo_id: "",
+      chofer_externo_nombre: "", chofer_externo_telefono: "", equipo_externo: "",
+      tipo_contenedor: "", tipo_operacion: "", nro_contenedor: "", peso_kg: "",
+      retiro_lugar: "", retiro_fecha: "",
+      entrega_direccion: "", entrega_fecha: "", entrega_hora: "",
       devolucion_lugar: "", devolucion_fecha: "", instrucciones: "",
     });
     setShowOpcionales(false);
@@ -134,14 +158,18 @@ export default function HojasDeRutaPage() {
 
   function abrirEditar(h: HojaRuta) {
     setForm({
-      chofer_id: h.chofer_id || "",
-      vehiculo_id: h.vehiculo_id || "",
       cliente_id: h.cliente_id || "",
+      chofer_id: h.chofer_externo_nombre ? CHOFER_EXTERNO_VALUE : (h.chofer_id || ""),
+      vehiculo_id: h.vehiculo_id || "",
+      chofer_externo_nombre: h.chofer_externo_nombre || "",
+      chofer_externo_telefono: h.chofer_externo_telefono || "",
+      equipo_externo: h.equipo_externo || "",
       tipo_contenedor: h.tipo_contenedor || "",
+      tipo_operacion: h.tipo_operacion || "",
       nro_contenedor: h.nro_contenedor || "",
-      booking_referencia: h.booking_referencia || "",
       peso_kg: h.peso_kg?.toString() || "",
       retiro_lugar: h.retiro_lugar || "",
+      retiro_fecha: h.retiro_fecha?.split("T")[0] || "",
       entrega_direccion: h.entrega_direccion || "",
       entrega_fecha: h.entrega_fecha?.split("T")[0] || "",
       entrega_hora: h.entrega_hora || "",
@@ -149,8 +177,8 @@ export default function HojasDeRutaPage() {
       devolucion_fecha: h.devolucion_fecha?.split("T")[0] || "",
       instrucciones: h.instrucciones || "",
     });
-    const tieneOpcionales = h.nro_contenedor || h.booking_referencia || h.peso_kg || h.devolucion_lugar || h.instrucciones;
-    setShowOpcionales(!!tieneOpcionales);
+    const tieneOp = h.nro_contenedor || h.tipo_operacion || h.peso_kg || h.devolucion_lugar || h.instrucciones;
+    setShowOpcionales(!!tieneOp);
     setEditando(h);
     setProximoNumero(h.numero);
     setModalOpen(true);
@@ -163,19 +191,26 @@ export default function HojasDeRutaPage() {
   }
 
   async function guardar(descargar: boolean) {
-    if (!form.chofer_id) { alert("Elegí un chofer"); return; }
     if (!form.cliente_id) { alert("Elegí un cliente"); return; }
+    if (!form.chofer_id) { alert("Elegí un chofer"); return; }
+    if (esChoferExterno && !form.chofer_externo_nombre.trim()) {
+      alert("Ingresá el nombre del chofer externo"); return;
+    }
     setGuardando(true);
     try {
       const payload = {
-        chofer_id: form.chofer_id || null,
-        vehiculo_id: form.vehiculo_id || null,
         cliente_id: form.cliente_id || null,
+        chofer_id: esChoferExterno ? null : (form.chofer_id || null),
+        vehiculo_id: esChoferExterno ? null : (form.vehiculo_id || null),
+        chofer_externo_nombre: esChoferExterno ? (form.chofer_externo_nombre.trim() || null) : null,
+        chofer_externo_telefono: esChoferExterno ? (form.chofer_externo_telefono.trim() || null) : null,
+        equipo_externo: esChoferExterno ? (form.equipo_externo.trim() || null) : null,
         tipo_contenedor: form.tipo_contenedor || null,
+        tipo_operacion: form.tipo_operacion || null,
         nro_contenedor: form.nro_contenedor || null,
-        booking_referencia: form.booking_referencia || null,
         peso_kg: form.peso_kg ? parseFloat(form.peso_kg) : null,
         retiro_lugar: form.retiro_lugar || null,
+        retiro_fecha: form.retiro_fecha || null,
         entrega_direccion: form.entrega_direccion || null,
         entrega_fecha: form.entrega_fecha || null,
         entrega_hora: form.entrega_hora || null,
@@ -185,29 +220,24 @@ export default function HojasDeRutaPage() {
       };
 
       let hojaGuardada: HojaRuta;
-
       if (editando) {
         const { data, error } = await supabase.from("hojas_de_ruta")
           .update(payload).eq("id", editando.id)
-          .select("*, chofer:chofer_id(nombre_completo), vehiculo:vehiculo_id(alias, chapa), cliente:cliente_id(nombre)")
+          .select("*, chofer:chofer_id(nombre_completo, telefono), vehiculo:vehiculo_id(alias, chapa), cliente:cliente_id(nombre)")
           .single();
         if (error) throw error;
         hojaGuardada = data as unknown as HojaRuta;
       } else {
         const { data, error } = await supabase.from("hojas_de_ruta")
           .insert({ ...payload, numero: proximoNumero })
-          .select("*, chofer:chofer_id(nombre_completo), vehiculo:vehiculo_id(alias, chapa), cliente:cliente_id(nombre)")
+          .select("*, chofer:chofer_id(nombre_completo, telefono), vehiculo:vehiculo_id(alias, chapa), cliente:cliente_id(nombre)")
           .single();
         if (error) throw error;
         hojaGuardada = data as unknown as HojaRuta;
       }
-
       await loadData();
       cerrarModal();
-
-      if (descargar) {
-        setTimeout(() => generarPDF(hojaGuardada), 300);
-      }
+      if (descargar) setTimeout(() => generarPDF(hojaGuardada), 300);
     } catch (err: any) {
       alert("Error al guardar: " + (err.message || "desconocido"));
     } finally {
@@ -220,6 +250,37 @@ export default function HojasDeRutaPage() {
     const { error } = await supabase.from("hojas_de_ruta").update({ estado: "anulada" }).eq("id", h.id);
     if (error) { alert("Error: " + error.message); return; }
     loadData();
+  }
+
+  function abrirWhatsApp(h: HojaRuta) {
+    const telefono = h.chofer_externo_nombre
+      ? phoneForWhatsApp(h.chofer_externo_telefono)
+      : phoneForWhatsApp(h.chofer?.telefono);
+    if (!telefono) {
+      alert("No hay teléfono guardado para este chofer.\n\nPara chofer propio: cargalo en el módulo /choferes.\nPara chofer externo: editá esta hoja y agregá el teléfono.");
+      return;
+    }
+    const nombre = h.chofer_externo_nombre || h.chofer?.nombre_completo?.split(" ")[0] || "chofer";
+    const equipoTxt = h.chofer_externo_nombre
+      ? (h.equipo_externo || "")
+      : (h.vehiculo?.alias ? `${h.vehiculo.alias} · ${h.vehiculo.chapa}` : "");
+    const labelEntrega = h.tipo_operacion === "export" ? "Carga" : "Descarga";
+
+    const partes = [
+      `Hola ${nombre}, te paso la hoja de ruta *${h.numero}*.`,
+      ``,
+      `*Cliente:* ${h.cliente?.nombre || "-"}`,
+    ];
+    if (equipoTxt) partes.push(`*Equipo:* ${equipoTxt}`);
+    if (h.tipo_contenedor) partes.push(`*Contenedor:* ${h.tipo_contenedor}`);
+    partes.push(`*Retiro:* ${h.retiro_lugar || "-"}${h.retiro_fecha ? " (" + fmtFecha(h.retiro_fecha) + ")" : ""}`);
+    partes.push(`*${labelEntrega}:* ${h.entrega_direccion || "-"}${h.entrega_fecha ? " (" + fmtFecha(h.entrega_fecha) + (h.entrega_hora ? " · " + fmtHora(h.entrega_hora) + " hs" : "") + ")" : ""}`);
+    partes.push(``);
+    partes.push(`Te adjunto el PDF a continuación.`);
+
+    const mensaje = partes.join("\n");
+    const url = `https://wa.me/${telefono}?text=${encodeURIComponent(mensaje)}`;
+    window.open(url, "_blank");
   }
 
   function generarPDF(h: HojaRuta) {
@@ -253,81 +314,108 @@ export default function HojasDeRutaPage() {
     doc.setFontSize(9);
     doc.text(fmtFecha(h.fecha_emision), W - 15, 25, { align: "right" });
 
-    // CHOFER + EQUIPO
+    // CLIENTE + CONTENEDOR (ivory, cliente destacado)
     doc.setFillColor(...ivory);
-    doc.rect(0, 28, W, 28, "F");
+    doc.rect(0, 28, W, 32, "F");
     doc.setTextColor(...gris);
     doc.setFontSize(8);
-    doc.text("CHOFER", 15, 36);
-    doc.text("EQUIPO", W / 2, 36);
+    doc.text("CLIENTE", 15, 36);
+    doc.text("CONTENEDOR", W / 2, 36);
     doc.setTextColor(...verdeOsc);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(14);
-    doc.text(h.chofer?.nombre_completo || "-", 15, 46);
-    const vehTxt = h.vehiculo?.alias ? `${h.vehiculo.alias} · ${h.vehiculo.chapa}` : (h.vehiculo?.chapa || "-");
-    doc.text(vehTxt, W / 2, 46);
+    doc.text(h.cliente?.nombre || "-", 15, 46);
+    doc.text(h.tipo_contenedor || "-", W / 2, 46);
 
-    // CLIENTE + CONTENEDOR
-    doc.setDrawColor(224, 221, 211);
-    doc.line(0, 56, W, 56);
-    doc.setTextColor(...gris);
-    doc.setFontSize(8);
-    doc.text("CLIENTE", 15, 64);
-    doc.text("CONTENEDOR", W / 2, 64);
-    doc.setTextColor(...ink);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(12);
-    doc.text(h.cliente?.nombre || "-", 15, 72);
-    doc.text(h.tipo_contenedor || "-", W / 2, 72);
-
+    // Badge Import/Export + extras
+    if (h.tipo_operacion) {
+      const label = h.tipo_operacion === "import" ? "IMPORT" : "EXPORT";
+      const bgColor: [number, number, number] = h.tipo_operacion === "import" ? [217, 234, 211] : [252, 229, 205];
+      const txtColor: [number, number, number] = h.tipo_operacion === "import" ? [56, 118, 29] : [153, 76, 0];
+      doc.setFillColor(...bgColor);
+      doc.roundedRect(15, 51, 20, 6, 1, 1, "F");
+      doc.setTextColor(...txtColor);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.text(label, 25, 55, { align: "center" });
+    }
     const extras: string[] = [];
     if (h.nro_contenedor) extras.push(`N° ${h.nro_contenedor}`);
-    if (h.booking_referencia) extras.push(`Booking: ${h.booking_referencia}`);
     if (h.peso_kg) extras.push(`${h.peso_kg.toLocaleString("es-PY")} kg`);
     if (extras.length > 0) {
       doc.setFont("helvetica", "normal");
       doc.setFontSize(8);
       doc.setTextColor(...gris);
-      doc.text(extras.join("  ·  "), W / 2, 78);
+      doc.text(extras.join("  ·  "), W / 2, 55);
     }
 
+    // CHOFER + EQUIPO
+    doc.setDrawColor(224, 221, 211);
+    doc.line(0, 60, W, 60);
+    doc.setTextColor(...gris);
+    doc.setFontSize(8);
+    doc.text("CHOFER", 15, 68);
+    doc.text("EQUIPO", W / 2, 68);
+    doc.setTextColor(...ink);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    const nombreChofer = h.chofer_externo_nombre
+      ? `${h.chofer_externo_nombre}`
+      : (h.chofer?.nombre_completo || "-");
+    doc.text(nombreChofer, 15, 76);
+    if (h.chofer_externo_nombre) {
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7);
+      doc.setTextColor(...gris);
+      doc.text("(externo)", 15, 80);
+    }
+    const equipoTxt = h.chofer_externo_nombre
+      ? (h.equipo_externo || "-")
+      : (h.vehiculo?.alias ? `${h.vehiculo.alias} · ${h.vehiculo.chapa}` : (h.vehiculo?.chapa || "-"));
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.setTextColor(...ink);
+    doc.text(equipoTxt, W / 2, 76);
+
     // RETIRO
-    doc.line(0, 84, W, 84);
+    doc.line(0, 85, W, 85);
     doc.setFillColor(...verdeBr);
-    doc.rect(0, 84, 3, 28, "F");
+    doc.rect(0, 85, 3, 28, "F");
     doc.setFillColor(250, 250, 247);
-    doc.rect(3, 84, W - 3, 28, "F");
+    doc.rect(3, 85, W - 3, 28, "F");
     doc.setTextColor(...verdeOsc);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
-    doc.text("RETIRO", 15, 93);
+    doc.text("RETIRO", 15, 94);
+    if (h.retiro_fecha) {
+      doc.setFontSize(11);
+      doc.text(fmtFecha(h.retiro_fecha), W - 15, 94, { align: "right" });
+    }
     doc.setTextColor(...ink);
     doc.setFontSize(13);
-    doc.text(h.retiro_lugar || "-", 15, 103);
+    doc.text(h.retiro_lugar || "-", 15, 104);
 
-    // ENTREGA
-    doc.line(0, 112, W, 112);
+    // DESCARGA / CARGA (según tipo)
+    doc.line(0, 113, W, 113);
     doc.setFillColor(...verdeBr);
-    doc.rect(0, 112, 3, 32, "F");
+    doc.rect(0, 113, 3, 32, "F");
     doc.setFillColor(250, 250, 247);
-    doc.rect(3, 112, W - 3, 32, "F");
+    doc.rect(3, 113, W - 3, 32, "F");
     doc.setTextColor(...verdeOsc);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
-    doc.text("ENTREGA", 15, 121);
+    doc.text(labelDescargaCarga(h.tipo_operacion), 15, 122);
     if (h.entrega_fecha) {
       const txtFH = `${fmtFecha(h.entrega_fecha)}${h.entrega_hora ? "  ·  " + fmtHora(h.entrega_hora) + " hs" : ""}`;
       doc.setFontSize(11);
-      doc.text(txtFH, W - 15, 121, { align: "right" });
+      doc.text(txtFH, W - 15, 122, { align: "right" });
     }
     doc.setTextColor(...ink);
     doc.setFontSize(13);
     const direccionLines = doc.splitTextToSize(h.entrega_direccion || "-", W - 30);
-    doc.text(direccionLines, 15, 132);
+    doc.text(direccionLines, 15, 133);
 
-    let y = 144;
-
-    // DEVOLUCIÓN
+    let y = 145;
     if (h.devolucion_lugar) {
       doc.line(0, y, W, y);
       doc.setFillColor(255, 255, 255);
@@ -345,7 +433,6 @@ export default function HojasDeRutaPage() {
       y += 20;
     }
 
-    // INSTRUCCIONES
     if (h.instrucciones) {
       doc.line(0, y, W, y);
       doc.setFillColor(...ivory);
@@ -389,7 +476,7 @@ export default function HojasDeRutaPage() {
       if (busqueda.trim()) {
         const q = busqueda.toLowerCase();
         const texto = [
-          h.numero, h.chofer?.nombre_completo, h.cliente?.nombre,
+          h.numero, h.chofer?.nombre_completo, h.chofer_externo_nombre, h.cliente?.nombre,
           h.nro_contenedor, h.retiro_lugar, h.entrega_direccion,
         ].filter(Boolean).join(" ").toLowerCase();
         if (!texto.includes(q)) return false;
@@ -449,8 +536,9 @@ export default function HojasDeRutaPage() {
                 <tr>
                   <th className="text-left p-3 font-bold text-xs uppercase tracking-wider">N°</th>
                   <th className="text-left p-3 font-bold text-xs uppercase tracking-wider">Fecha</th>
-                  <th className="text-left p-3 font-bold text-xs uppercase tracking-wider">Chofer</th>
                   <th className="text-left p-3 font-bold text-xs uppercase tracking-wider">Cliente</th>
+                  <th className="text-left p-3 font-bold text-xs uppercase tracking-wider">Chofer</th>
+                  <th className="text-left p-3 font-bold text-xs uppercase tracking-wider">Tipo</th>
                   <th className="text-left p-3 font-bold text-xs uppercase tracking-wider">Ruta</th>
                   <th className="text-left p-3 font-bold text-xs uppercase tracking-wider">Estado</th>
                   <th className="text-right p-3 font-bold text-xs uppercase tracking-wider">Acciones</th>
@@ -459,21 +547,36 @@ export default function HojasDeRutaPage() {
               <tbody>
                 {hojasFiltradas.map(h => {
                   const estado = ESTADOS[h.estado] || ESTADOS.emitida;
+                  const nombreChofer = h.chofer_externo_nombre || h.chofer?.nombre_completo || "-";
                   return (
                     <tr key={h.id} className="border-t border-teus-border_light hover:bg-teus-bg_soft/40">
                       <td className="p-3 font-bold text-teus-accent-dark font-mono">{h.numero}</td>
                       <td className="p-3">{fmtFechaCorta(h.fecha_emision)}</td>
-                      <td className="p-3 font-semibold">{h.chofer?.nombre_completo || "-"}</td>
-                      <td className="p-3">{h.cliente?.nombre || "-"}</td>
+                      <td className="p-3 font-semibold">{h.cliente?.nombre || "-"}</td>
+                      <td className="p-3">
+                        {nombreChofer}
+                        {h.chofer_externo_nombre && <span className="ml-1 text-[9px] bg-gray-200 text-gray-700 px-1 py-0.5 rounded font-bold">EXT</span>}
+                      </td>
+                      <td className="p-3">
+                        {h.tipo_operacion && (
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${h.tipo_operacion === "import" ? "bg-green-100 text-green-800" : "bg-orange-100 text-orange-800"}`}>
+                            {h.tipo_operacion.toUpperCase()}
+                          </span>
+                        )}
+                      </td>
                       <td className="p-3 text-teus-text_muted text-xs">
                         {h.retiro_lugar ? h.retiro_lugar.split(" - ")[0] : "-"} → {h.entrega_direccion ? h.entrega_direccion.substring(0, 20) : "-"}
                       </td>
                       <td className="p-3">
                         <span className={`${estado.bg} ${estado.text} text-[10px] px-2 py-1 rounded-full font-bold`}>{estado.label}</span>
                       </td>
-                      <td className="p-3 text-right">
+                      <td className="p-3 text-right whitespace-nowrap">
+                        <button onClick={() => abrirWhatsApp(h)} title="Abrir WhatsApp"
+                          className="text-green-600 hover:text-green-800 p-1">
+                          <MessageCircle className="w-4 h-4 inline" />
+                        </button>
                         <button onClick={() => generarPDF(h)} title="Descargar PDF"
-                          className="text-teus-accent hover:text-teus-accent-2 p-1">
+                          className="text-teus-accent hover:text-teus-accent-2 p-1 ml-1">
                           <Download className="w-4 h-4 inline" />
                         </button>
                         <button onClick={() => abrirEditar(h)} title="Editar"
@@ -518,22 +621,6 @@ export default function HojasDeRutaPage() {
                 <div className="text-[11px] uppercase font-bold text-teus-accent tracking-widest mb-2">Operación</div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-xs font-bold text-teus-text_dark">Chofer *</label>
-                    <select value={form.chofer_id} onChange={e => setForm({ ...form, chofer_id: e.target.value })}
-                      className="w-full bg-white border rounded-lg px-3 py-2 text-sm mt-1">
-                      <option value="">Elegir chofer...</option>
-                      {choferes.map(c => <option key={c.id} value={c.id}>{c.nombre_completo}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-teus-text_dark">Vehículo</label>
-                    <select value={form.vehiculo_id} onChange={e => setForm({ ...form, vehiculo_id: e.target.value })}
-                      className="w-full bg-white border rounded-lg px-3 py-2 text-sm mt-1">
-                      <option value="">Elegir vehículo...</option>
-                      {vehiculos.map(v => <option key={v.id} value={v.id}>{v.alias || v.chapa} · {v.chapa}</option>)}
-                    </select>
-                  </div>
-                  <div>
                     <label className="text-xs font-bold text-teus-text_dark">Cliente *</label>
                     <select value={form.cliente_id} onChange={e => setForm({ ...form, cliente_id: e.target.value })}
                       className="w-full bg-white border rounded-lg px-3 py-2 text-sm mt-1">
@@ -549,38 +636,87 @@ export default function HojasDeRutaPage() {
                       {TIPOS_CONTENEDOR.map(t => <option key={t} value={t}>{t}</option>)}
                     </select>
                   </div>
+                  <div>
+                    <label className="text-xs font-bold text-teus-text_dark">Chofer *</label>
+                    <select value={form.chofer_id} onChange={e => setForm({ ...form, chofer_id: e.target.value })}
+                      className="w-full bg-white border rounded-lg px-3 py-2 text-sm mt-1">
+                      <option value="">Elegir chofer...</option>
+                      {choferes.map(c => <option key={c.id} value={c.id}>{c.nombre_completo}</option>)}
+                      <option value={CHOFER_EXTERNO_VALUE}>+ Chofer externo (otro)</option>
+                    </select>
+                  </div>
+                  {!esChoferExterno ? (
+                    <div>
+                      <label className="text-xs font-bold text-teus-text_dark">Vehículo</label>
+                      <select value={form.vehiculo_id} onChange={e => setForm({ ...form, vehiculo_id: e.target.value })}
+                        className="w-full bg-white border rounded-lg px-3 py-2 text-sm mt-1">
+                        <option value="">Elegir vehículo...</option>
+                        {vehiculos.map(v => <option key={v.id} value={v.id}>{v.alias || v.chapa} · {v.chapa}</option>)}
+                      </select>
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="text-xs font-bold text-teus-text_dark">Equipo externo</label>
+                      <input type="text" value={form.equipo_externo}
+                        onChange={e => setForm({ ...form, equipo_externo: e.target.value })}
+                        placeholder="Volvo FH · Chapa ABC123"
+                        className="w-full bg-white border rounded-lg px-3 py-2 text-sm mt-1" />
+                    </div>
+                  )}
                 </div>
+
+                {esChoferExterno && (
+                  <div className="grid grid-cols-2 gap-3 mt-3 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                    <div>
+                      <label className="text-xs font-bold text-amber-900">Nombre del chofer externo *</label>
+                      <input type="text" value={form.chofer_externo_nombre}
+                        onChange={e => setForm({ ...form, chofer_externo_nombre: e.target.value })}
+                        placeholder="Carlos Benitez"
+                        className="w-full bg-white border border-amber-300 rounded-lg px-3 py-2 text-sm mt-1" />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-amber-900">Teléfono WhatsApp</label>
+                      <input type="text" value={form.chofer_externo_telefono}
+                        onChange={e => setForm({ ...form, chofer_externo_telefono: e.target.value })}
+                        placeholder="0981 123456"
+                        className="w-full bg-white border border-amber-300 rounded-lg px-3 py-2 text-sm mt-1" />
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div>
                 <div className="text-[11px] uppercase font-bold text-teus-accent tracking-widest mb-2">Retiro</div>
-                <div>
-                  <label className="text-xs font-bold text-teus-text_dark">Puerto / terminal</label>
-                  <select value={form.retiro_lugar} onChange={e => setForm({ ...form, retiro_lugar: e.target.value })}
-                    className="w-full bg-white border rounded-lg px-3 py-2 text-sm mt-1">
-                    <option value="">Elegir terminal...</option>
-                    {TERMINALES.map(t => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                  {form.retiro_lugar === "Otro" && (
-                    <input type="text" placeholder="Especificá el lugar"
-                      onChange={e => setForm({ ...form, retiro_lugar: e.target.value })}
-                      className="w-full bg-white border rounded-lg px-3 py-2 text-sm mt-2" />
-                  )}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-bold text-teus-text_dark">Puerto / terminal</label>
+                    <select value={form.retiro_lugar} onChange={e => setForm({ ...form, retiro_lugar: e.target.value })}
+                      className="w-full bg-white border rounded-lg px-3 py-2 text-sm mt-1">
+                      <option value="">Elegir terminal...</option>
+                      {TERMINALES.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-teus-text_dark">Fecha de retiro</label>
+                    <input type="date" value={form.retiro_fecha}
+                      onChange={e => setForm({ ...form, retiro_fecha: e.target.value })}
+                      className="w-full bg-white border rounded-lg px-3 py-2 text-sm mt-1" />
+                  </div>
                 </div>
               </div>
 
               <div>
-                <div className="text-[11px] uppercase font-bold text-teus-accent tracking-widest mb-2">Entrega</div>
+                <div className="text-[11px] uppercase font-bold text-teus-accent tracking-widest mb-2">Descarga / Carga</div>
                 <div className="grid grid-cols-4 gap-3">
                   <div className="col-span-2">
-                    <label className="text-xs font-bold text-teus-text_dark">Dirección de entrega</label>
+                    <label className="text-xs font-bold text-teus-text_dark">Dirección</label>
                     <input type="text" value={form.entrega_direccion}
                       onChange={e => setForm({ ...form, entrega_direccion: e.target.value })}
                       placeholder="Av. Industrial 1234, CDE"
                       className="w-full bg-white border rounded-lg px-3 py-2 text-sm mt-1" />
                   </div>
                   <div>
-                    <label className="text-xs font-bold text-teus-text_dark">Fecha llegada</label>
+                    <label className="text-xs font-bold text-teus-text_dark">Fecha</label>
                     <input type="date" value={form.entrega_fecha}
                       onChange={e => setForm({ ...form, entrega_fecha: e.target.value })}
                       className="w-full bg-white border rounded-lg px-3 py-2 text-sm mt-1" />
@@ -597,25 +733,28 @@ export default function HojasDeRutaPage() {
               <button type="button" onClick={() => setShowOpcionales(!showOpcionales)}
                 className="w-full flex items-center justify-center gap-2 py-2 text-xs text-teus-text_muted border border-dashed border-teus-border_light rounded-lg hover:bg-teus-bg_soft">
                 {showOpcionales ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                {showOpcionales ? "Ocultar" : "Agregar"} datos opcionales (N° contenedor, booking, peso, devolución, instrucciones)
+                {showOpcionales ? "Ocultar" : "Agregar"} datos opcionales (tipo, N° contenedor, peso, devolución, instrucciones)
               </button>
 
               {showOpcionales && (
                 <div className="space-y-4 border-l-2 border-teus-accent pl-4">
                   <div className="grid grid-cols-3 gap-3">
                     <div>
+                      <label className="text-xs font-bold text-teus-text_dark">Tipo de operación</label>
+                      <select value={form.tipo_operacion}
+                        onChange={e => setForm({ ...form, tipo_operacion: e.target.value })}
+                        className="w-full bg-white border rounded-lg px-3 py-2 text-sm mt-1">
+                        <option value="">Sin definir</option>
+                        <option value="import">Import</option>
+                        <option value="export">Export</option>
+                      </select>
+                    </div>
+                    <div>
                       <label className="text-xs font-bold text-teus-text_dark">N° contenedor</label>
                       <input type="text" value={form.nro_contenedor}
                         onChange={e => setForm({ ...form, nro_contenedor: e.target.value })}
                         placeholder="TGBU 1234567"
                         className="w-full bg-white border rounded-lg px-3 py-2 text-sm mt-1 font-mono" />
-                    </div>
-                    <div>
-                      <label className="text-xs font-bold text-teus-text_dark">Booking / referencia</label>
-                      <input type="text" value={form.booking_referencia}
-                        onChange={e => setForm({ ...form, booking_referencia: e.target.value })}
-                        placeholder="BK-2026-9876"
-                        className="w-full bg-white border rounded-lg px-3 py-2 text-sm mt-1" />
                     </div>
                     <div>
                       <label className="text-xs font-bold text-teus-text_dark">Peso aprox. (kg)</label>
