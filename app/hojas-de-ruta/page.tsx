@@ -1,12 +1,14 @@
 "use client";
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useUserRole } from "@/lib/supabase/useUserRole";
 import { ClipboardList, Plus, Download, Edit, X, Loader2, Search, Trash2, ChevronDown, ChevronUp, MessageCircle } from "lucide-react";
 import jsPDF from "jspdf";
 
 type Chofer = { id: string; nombre_completo: string; telefono: string | null };
 type Vehiculo = { id: string; alias: string | null; chapa: string };
 type Cliente = { id: string; nombre: string };
+type UsuarioPerfil = { id: string; nombre_completo: string | null; rol: string };
 
 type HojaRuta = {
   id: string;
@@ -31,6 +33,9 @@ type HojaRuta = {
   devolucion_fecha: string | null;
   instrucciones: string | null;
   estado: string;
+  creado_por: string | null;
+  modificado_por: string | null;
+  modificado_at: string | null;
   chofer?: { nombre_completo: string; telefono: string | null } | null;
   vehiculo?: { alias: string | null; chapa: string } | null;
   cliente?: { nombre: string } | null;
@@ -47,6 +52,9 @@ const ESTADOS: Record<string, { label: string; bg: string; text: string }> = {
   anulada: { label: "Anulada", bg: "bg-red-100", text: "text-red-800" },
 };
 
+function fmtGs(n: number) {
+  return "Gs. " + Math.round(n || 0).toLocaleString("es-PY");
+}
 function fmtFecha(f: string | null): string {
   if (!f) return "-";
   const [y, m, d] = f.split("T")[0].split("-");
@@ -74,13 +82,22 @@ function labelDescargaCarga(tipo: string | null): string {
   if (tipo === "export") return "CARGA";
   return "DESCARGA / CARGA";
 }
+function fmtVehiculo(v?: { alias: string | null; chapa: string } | null): string {
+  if (!v) return "-";
+  const alias = v.alias || "";
+  const chapa = v.chapa || "";
+  if (alias && chapa) return `${alias} · ${chapa}`;
+  return alias || chapa || "-";
+}
 
 export default function HojasDeRutaPage() {
   const supabase = createClient();
+  const { isAdmin } = useUserRole();
   const [hojas, setHojas] = useState<HojaRuta[]>([]);
   const [choferes, setChoferes] = useState<Chofer[]>([]);
   const [vehiculos, setVehiculos] = useState<Vehiculo[]>([]);
   const [clientes, setClientes] = useState<Cliente[]>([]);
+  const [perfiles, setPerfiles] = useState<Map<string, UsuarioPerfil>>(new Map());
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [editando, setEditando] = useState<HojaRuta | null>(null);
@@ -115,18 +132,24 @@ export default function HojasDeRutaPage() {
 
   async function loadData() {
     setLoading(true);
-    const [hojasRes, choferesRes, vehiculosRes, clientesRes] = await Promise.all([
+    const [hojasRes, choferesRes, vehiculosRes, clientesRes, perfilesRes] = await Promise.all([
       supabase.from("hojas_de_ruta")
         .select("*, chofer:chofer_id(nombre_completo, telefono), vehiculo:vehiculo_id(alias, chapa), cliente:cliente_id(nombre)")
         .order("created_at", { ascending: false }),
       supabase.from("choferes").select("id, nombre_completo, telefono").eq("activo", true).order("nombre_completo"),
       supabase.from("vehiculos").select("id, alias, chapa").eq("activo", true).eq("tipo", "tracto").order("alias"),
       supabase.from("clientes").select("id, nombre").eq("activo", true).order("nombre"),
+      supabase.from("usuarios_perfil").select("id, nombre_completo, rol"),
     ]);
     setHojas((hojasRes.data as unknown as HojaRuta[]) || []);
     setChoferes(choferesRes.data || []);
     setVehiculos(vehiculosRes.data || []);
     setClientes(clientesRes.data || []);
+    if (perfilesRes.data) {
+      const m = new Map<string, UsuarioPerfil>();
+      perfilesRes.data.forEach((p: any) => m.set(p.id, p));
+      setPerfiles(m);
+    }
     setLoading(false);
   }
 
@@ -292,7 +315,6 @@ export default function HojasDeRutaPage() {
     const gris: [number, number, number] = [110, 120, 115];
     const ink: [number, number, number] = [21, 32, 28];
 
-    // HEADER
     doc.setFillColor(...verdeOsc);
     doc.rect(0, 0, W, 28, "F");
     doc.setTextColor(...verdeBr);
@@ -314,7 +336,6 @@ export default function HojasDeRutaPage() {
     doc.setFontSize(9);
     doc.text(fmtFecha(h.fecha_emision), W - 15, 25, { align: "right" });
 
-    // CLIENTE + CONTENEDOR (ivory, cliente destacado)
     doc.setFillColor(...ivory);
     doc.rect(0, 28, W, 32, "F");
     doc.setTextColor(...gris);
@@ -327,7 +348,6 @@ export default function HojasDeRutaPage() {
     doc.text(h.cliente?.nombre || "-", 15, 46);
     doc.text(h.tipo_contenedor || "-", W / 2, 46);
 
-    // Badge Import/Export + extras
     if (h.tipo_operacion) {
       const label = h.tipo_operacion === "import" ? "IMPORT" : "EXPORT";
       const bgColor: [number, number, number] = h.tipo_operacion === "import" ? [217, 234, 211] : [252, 229, 205];
@@ -349,7 +369,6 @@ export default function HojasDeRutaPage() {
       doc.text(extras.join("  ·  "), W / 2, 55);
     }
 
-    // CHOFER + EQUIPO
     doc.setDrawColor(224, 221, 211);
     doc.line(0, 60, W, 60);
     doc.setTextColor(...gris);
@@ -377,7 +396,6 @@ export default function HojasDeRutaPage() {
     doc.setTextColor(...ink);
     doc.text(equipoTxt, W / 2, 76);
 
-    // RETIRO
     doc.line(0, 85, W, 85);
     doc.setFillColor(...verdeBr);
     doc.rect(0, 85, 3, 28, "F");
@@ -395,7 +413,6 @@ export default function HojasDeRutaPage() {
     doc.setFontSize(13);
     doc.text(h.retiro_lugar || "-", 15, 104);
 
-    // DESCARGA / CARGA (según tipo)
     doc.line(0, 113, W, 113);
     doc.setFillColor(...verdeBr);
     doc.rect(0, 113, 3, 32, "F");
@@ -449,7 +466,6 @@ export default function HojasDeRutaPage() {
       y += 30;
     }
 
-    // FOOTER
     const footerY = 282;
     doc.setFillColor(...verdeOsc);
     doc.rect(0, footerY, W, 15, "F");
@@ -484,6 +500,25 @@ export default function HojasDeRutaPage() {
       return true;
     });
   }, [hojas, filtroEstado, busqueda]);
+
+  function perfilDe(id: string | null): UsuarioPerfil | null {
+    if (!id) return null;
+    return perfiles.get(id) || null;
+  }
+
+  function ChipCoordinador({ perfil, tipo }: { perfil: UsuarioPerfil; tipo: "creado" | "modificado" }) {
+    const icono = tipo === "creado" ? "✨" : "✎";
+    const label = tipo === "creado" ? "Creado por" : "Modif. por";
+    const bg = tipo === "creado" ? "bg-amber-100 text-amber-800 border-amber-300" : "bg-purple-100 text-purple-800 border-purple-300";
+    return (
+      <span
+        title={`${label} ${perfil.nombre_completo || "Usuario"}`}
+        className={`inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${bg} ml-1`}
+      >
+        {icono} {perfil.nombre_completo || "Coord."}
+      </span>
+    );
+  }
 
   return (
     <div className="px-8 py-6 pb-16">
@@ -548,9 +583,25 @@ export default function HojasDeRutaPage() {
                 {hojasFiltradas.map(h => {
                   const estado = ESTADOS[h.estado] || ESTADOS.emitida;
                   const nombreChofer = h.chofer_externo_nombre || h.chofer?.nombre_completo || "-";
+                  const creador = perfilDe(h.creado_por);
+                  const modificador = perfilDe(h.modificado_por);
+                  const creadorEsCoord = creador?.rol === "coordinador";
+                  const modificadorEsCoord =
+                    modificador?.rol === "coordinador" &&
+                    h.modificado_por !== h.creado_por;
                   return (
                     <tr key={h.id} className="border-t border-teus-border_light hover:bg-teus-bg_soft/40">
-                      <td className="p-3 font-bold text-teus-accent-dark font-mono">{h.numero}</td>
+                      <td className="p-3 font-bold text-teus-accent-dark font-mono">
+                        <div className="flex items-center flex-wrap gap-y-1">
+                          <span>{h.numero}</span>
+                          {isAdmin && creadorEsCoord && creador && (
+                            <ChipCoordinador perfil={creador} tipo="creado" />
+                          )}
+                          {isAdmin && modificadorEsCoord && modificador && (
+                            <ChipCoordinador perfil={modificador} tipo="modificado" />
+                          )}
+                        </div>
+                      </td>
                       <td className="p-3">{fmtFechaCorta(h.fecha_emision)}</td>
                       <td className="p-3 font-semibold">{h.cliente?.nombre || "-"}</td>
                       <td className="p-3">
@@ -596,6 +647,20 @@ export default function HojasDeRutaPage() {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {isAdmin && hojasFiltradas.length > 0 && (
+        <div className="text-xs text-teus-text_soft mt-4 px-1 flex items-center gap-3 flex-wrap">
+          <span className="inline-flex items-center gap-1">
+            <span className="inline-block px-1.5 py-0.5 bg-amber-100 text-amber-800 border border-amber-300 rounded-full font-bold text-[10px]">✨ chip</span>
+            = creado por el coordinador
+          </span>
+          <span className="mx-2">·</span>
+          <span className="inline-flex items-center gap-1">
+            <span className="inline-block px-1.5 py-0.5 bg-purple-100 text-purple-800 border border-purple-300 rounded-full font-bold text-[10px]">✎ chip</span>
+            = modificado por el coordinador
+          </span>
         </div>
       )}
 
