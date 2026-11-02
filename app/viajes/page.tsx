@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { useUserRole } from "@/lib/supabase/useUserRole";
 import {
   Plus, Edit2, Trash2, X, ClipboardList, Search, Loader2,
   Calendar, TrendingUp, DollarSign, Truck, MapPin,
@@ -74,6 +75,7 @@ export default function ViajesPage() {
   const supabase = createClient();
   const searchParams = useSearchParams();
   const router = useRouter();
+  const { isAdmin, isCoordinador, loading: loadingRol } = useUserRole();
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
@@ -147,6 +149,10 @@ export default function ViajesPage() {
     return { totalViajes, facturacion, utilidadBruta, kmTotal };
   }, [filtered]);
   async function deleteViaje(v: Viaje) {
+    if (!isAdmin) {
+      alert("Solo el administrador puede eliminar viajes.");
+      return;
+    }
     if (v.factura_id) {
       alert(`Este viaje está vinculado a la factura ${v.factura?.nro_factura || ""}. Desvinculalo primero desde la factura.`);
       return;
@@ -164,7 +170,9 @@ export default function ViajesPage() {
             Producción / Viajes
           </h1>
           <p className="text-sm text-teus-text_muted mt-1">
-            Registro de fletes y utilidad por viaje
+            {isCoordinador
+              ? "Registro de viajes · El precio y la utilidad los completa el administrador"
+              : "Registro de fletes y utilidad por viaje"}
           </p>
         </div>
         <button
@@ -198,16 +206,16 @@ export default function ViajesPage() {
           <select value={filterEstado} onChange={(e) => setFilterEstado(e.target.value)} className="bg-white border border-teus-border_light rounded-lg px-3 py-2 text-sm text-teus-text_dark focus:outline-none focus:border-teus-accent focus:ring-2 focus:ring-teus-accent/20">
             <option value="">Todos los estados</option>
             <option value="pendiente">Pendiente</option>
-            <option value="facturado">Facturado</option>
-            <option value="cobrado">Cobrado</option>
+            {isAdmin && <option value="facturado">Facturado</option>}
+            {isAdmin && <option value="cobrado">Cobrado</option>}
             <option value="cancelado">Cancelado</option>
           </select>
         </div>
       </div>
-      <div className="grid grid-cols-4 gap-4 mb-4">
+      <div className={`grid gap-4 mb-4 ${isAdmin ? "grid-cols-4" : "grid-cols-2"}`}>
         <KpiCard label="Viajes" value={totales.totalViajes.toString()} icon={ClipboardList} sub={`${MESES_ES[month-1]} ${year}`} />
-        <KpiCard label="Facturación" value={fmtGsShort(totales.facturacion)} icon={DollarSign} sub={fmtGs(totales.facturacion)} />
-        <KpiCard label="Utilidad Bruta" value={fmtGsShort(totales.utilidadBruta)} icon={TrendingUp} sub={`${totales.facturacion ? ((totales.utilidadBruta/totales.facturacion)*100).toFixed(1) : 0}% margen`} />
+        {isAdmin && <KpiCard label="Facturación" value={fmtGsShort(totales.facturacion)} icon={DollarSign} sub={fmtGs(totales.facturacion)} />}
+        {isAdmin && <KpiCard label="Utilidad Bruta" value={fmtGsShort(totales.utilidadBruta)} icon={TrendingUp} sub={`${totales.facturacion ? ((totales.utilidadBruta/totales.facturacion)*100).toFixed(1) : 0}% margen`} />}
         <KpiCard label="Km recorridos" value={totales.kmTotal.toLocaleString("es-PY")} icon={MapPin} sub="Total del mes" />
       </div>
       <div className="bg-teus-card_light border border-teus-border_light rounded-xl overflow-hidden shadow-card">
@@ -241,9 +249,9 @@ export default function ViajesPage() {
                   <th className="px-3 py-3 font-bold">Cliente</th>
                   <th className="px-3 py-3 font-bold">Ruta</th>
                   <th className="px-3 py-3 font-bold">Contenedor</th>
-                  <th className="px-3 py-3 font-bold">Factura</th>
-                  <th className="px-3 py-3 font-bold text-right">Flete</th>
-                  <th className="px-3 py-3 font-bold text-right">Utilidad</th>
+                  {isAdmin && <th className="px-3 py-3 font-bold">Factura</th>}
+                  {isAdmin && <th className="px-3 py-3 font-bold text-right">Flete</th>}
+                  {isAdmin && <th className="px-3 py-3 font-bold text-right">Utilidad</th>}
                   <th className="px-3 py-3 font-bold">Estado</th>
                   <th className="px-3 py-3 font-bold text-right">Acciones</th>
                 </tr>
@@ -258,7 +266,7 @@ export default function ViajesPage() {
                     <td className="px-3 py-3 text-xs text-teus-text_muted">{v.chofer?.nombre_completo || "—"}</td>
                     <td className="px-3 py-3 text-xs text-teus-text_dark font-semibold">
                       {v.cliente?.nombre || "—"}
-                      {v.cliente_final?.nombre && (
+                      {isAdmin && v.cliente_final?.nombre && (
                         <div className="text-[9px] text-purple-700 font-bold mt-0.5">→ Final: {v.cliente_final.nombre}</div>
                       )}
                     </td>
@@ -269,22 +277,28 @@ export default function ViajesPage() {
                       {v.km_viaje ? <span className="ml-2 text-teus-accent font-bold">{v.km_viaje}km</span> : null}
                     </td>
                     <td className="px-3 py-3 font-mono text-[10px] text-teus-text_muted">{v.nro_contenedor || "—"}</td>
-                    <td className="px-3 py-3">
-                      {v.factura?.nro_factura ? (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold px-2 py-1 rounded bg-blue-50 text-blue-700 border border-blue-200">
-                          📄 {v.factura.nro_factura}
-                        </span>
-                      ) : (
-                        <span className="text-xs text-teus-text_soft">—</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-3 text-right font-semibold text-teus-text_dark whitespace-nowrap">
-                      {fmtGsShort(v.precio_flete)}
-                      {(v.ingresos_extras_monto || 0) > 0 && (
-                        <div className="text-[9px] text-blue-600 font-bold">+{fmtGsShort(v.ingresos_extras_monto)} extra</div>
-                      )}
-                    </td>
-                    <td className="px-3 py-3 text-right font-bold text-teus-accent whitespace-nowrap">{fmtGsShort(v.utilidad_bruta)}</td>
+                    {isAdmin && (
+                      <td className="px-3 py-3">
+                        {v.factura?.nro_factura ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold px-2 py-1 rounded bg-blue-50 text-blue-700 border border-blue-200">
+                            📄 {v.factura.nro_factura}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-teus-text_soft">—</span>
+                        )}
+                      </td>
+                    )}
+                    {isAdmin && (
+                      <td className="px-3 py-3 text-right font-semibold text-teus-text_dark whitespace-nowrap">
+                        {fmtGsShort(v.precio_flete)}
+                        {(v.ingresos_extras_monto || 0) > 0 && (
+                          <div className="text-[9px] text-blue-600 font-bold">+{fmtGsShort(v.ingresos_extras_monto)} extra</div>
+                        )}
+                      </td>
+                    )}
+                    {isAdmin && (
+                      <td className="px-3 py-3 text-right font-bold text-teus-accent whitespace-nowrap">{fmtGsShort(v.utilidad_bruta)}</td>
+                    )}
                     <td className="px-3 py-3">
                       <span className={`inline-flex items-center text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded ${ESTADOS[v.estado]?.classes || ""}`}>
                         {ESTADOS[v.estado]?.label || v.estado}
@@ -293,7 +307,9 @@ export default function ViajesPage() {
                     <td className="px-3 py-3 text-right">
                       <div className="inline-flex gap-1">
                         <button onClick={() => { setEditing(v); setShowModal(true); }} className="p-1.5 rounded-lg hover:bg-teus-accent/10 text-teus-text_muted hover:text-teus-accent transition" title="Editar"><Edit2 className="w-4 h-4" /></button>
-                        <button onClick={() => deleteViaje(v)} className="p-1.5 rounded-lg text-teus-text_muted hover:text-teus-danger hover:bg-teus-danger-light transition" title="Eliminar"><Trash2 className="w-4 h-4" /></button>
+                        {isAdmin && (
+                          <button onClick={() => deleteViaje(v)} className="p-1.5 rounded-lg text-teus-text_muted hover:text-teus-danger hover:bg-teus-danger-light transition" title="Eliminar"><Trash2 className="w-4 h-4" /></button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -314,6 +330,7 @@ export default function ViajesPage() {
           clientes={clientes}
           rutas={rutas}
           proveedores={proveedores}
+          isAdmin={isAdmin}
           onClose={() => setShowModal(false)}
           onSaved={() => { setShowModal(false); loadData(); }}
         />
@@ -336,7 +353,7 @@ function KpiCard({ label, value, icon: Icon, sub }: { label: string; value: stri
   );
 }
 function ViajeModal({
-  viaje, vehiculos, choferes, clientes, rutas, proveedores, onClose, onSaved,
+  viaje, vehiculos, choferes, clientes, rutas, proveedores, isAdmin, onClose, onSaved,
 }: {
   viaje: Viaje | null;
   vehiculos: Vehiculo[];
@@ -344,6 +361,7 @@ function ViajeModal({
   clientes: Cliente[];
   rutas: Ruta[];
   proveedores: Proveedor[];
+  isAdmin: boolean;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -475,14 +493,16 @@ function ViajeModal({
               {viaje ? "Editar Viaje" : "Nuevo Viaje"}
             </h2>
             <p className="text-xs text-teus-text_muted mt-0.5">
-              Los cálculos de utilidad se hacen automáticamente
+              {isAdmin
+                ? "Los cálculos de utilidad se hacen automáticamente"
+                : "Cargá la operación. El precio del flete y utilidad los completa el administrador."}
             </p>
           </div>
           <button onClick={onClose} className="p-2 rounded-lg hover:bg-teus-hover_light text-teus-text_muted hover:text-teus-text_dark transition">
             <X className="w-5 h-5" />
           </button>
         </div>
-        {viaje?.factura_id && (
+        {viaje?.factura_id && isAdmin && (
           <div className="mx-6 mt-4 bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-900">
             📄 Este viaje está vinculado a la factura <strong className="font-mono">{viaje.factura?.nro_factura || viaje.factura_id}</strong>. Si querés desvincularlo, editá la factura y sacá el check de este viaje.
           </div>
@@ -497,11 +517,11 @@ function ViajeModal({
               <label className={labelCls}>Estado</label>
               <select value={form.estado} onChange={(e) => setForm({ ...form, estado: e.target.value as any })} className={inputCls} disabled={!!viaje?.factura_id}>
                 <option value="pendiente">Pendiente</option>
-                <option value="facturado">Facturado</option>
-                <option value="cobrado">Cobrado</option>
+                {isAdmin && <option value="facturado">Facturado</option>}
+                {isAdmin && <option value="cobrado">Cobrado</option>}
                 <option value="cancelado">Cancelado</option>
               </select>
-              {viaje?.factura_id && <div className="text-[10px] text-blue-700 font-bold mt-1">Estado gestionado desde la factura</div>}
+              {viaje?.factura_id && isAdmin && <div className="text-[10px] text-blue-700 font-bold mt-1">Estado gestionado desde la factura</div>}
             </div>
             <div>
               <label className={labelCls}>N° Contenedor</label>
@@ -531,51 +551,52 @@ function ViajeModal({
               </select>
             </div>
           </div>
-          {/* Cliente final (opcional) - checkbox condicional */}
-          <div className="bg-purple-50 border border-purple-200 rounded-xl p-4">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={tieneClienteFinal}
-                onChange={(e) => {
-                  const checked = e.target.checked;
-                  setTieneClienteFinal(checked);
-                  if (!checked) {
-                    setForm({ ...form, cliente_final_id: "", tarifa_bruta_cliente_final: 0, comision_externa: 0 });
-                  }
-                }}
-                className="w-4 h-4 accent-purple-600" />
-              <span className="text-sm font-bold text-purple-900">🎯 Cliente final distinto del facturado (ej: DONGJING facturado vía TL)</span>
-            </label>
-            {tieneClienteFinal && (
-              <div className="mt-3 space-y-3">
-                <div className="text-[10px] text-purple-800 bg-white/60 rounded p-2">
-                  ℹ️ El <strong>Precio flete</strong> abajo sigue siendo tu ingreso NETO. Los campos de tarifa bruta y comisión son informativos — no se suman ni se restan.
-                </div>
-                <div>
-                  <label className={labelCls}>Cliente final / dueño de la carga *</label>
-                  <select value={form.cliente_final_id} onChange={(e) => setForm({ ...form, cliente_final_id: e.target.value })} className={inputCls}>
-                    <option value="">— Elegir cliente final —</option>
-                    {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-                  </select>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className={labelCls}>Tarifa bruta al cliente final (Gs.)</label>
-                    <input type="number" value={form.tarifa_bruta_cliente_final || ""}
-                      onChange={(e) => setForm({ ...form, tarifa_bruta_cliente_final: parseInt(e.target.value) || 0 })}
-                      placeholder="5950000" className={inputCls} />
-                    <div className="text-[10px] text-purple-700 mt-1">{fmtGs(form.tarifa_bruta_cliente_final || 0)} · informativo</div>
+          {isAdmin && (
+            <div className="bg-purple-50 border border-purple-200 rounded-xl p-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={tieneClienteFinal}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setTieneClienteFinal(checked);
+                    if (!checked) {
+                      setForm({ ...form, cliente_final_id: "", tarifa_bruta_cliente_final: 0, comision_externa: 0 });
+                    }
+                  }}
+                  className="w-4 h-4 accent-purple-600" />
+                <span className="text-sm font-bold text-purple-900">🎯 Cliente final distinto del facturado (ej: DONGJING facturado vía TL)</span>
+              </label>
+              {tieneClienteFinal && (
+                <div className="mt-3 space-y-3">
+                  <div className="text-[10px] text-purple-800 bg-white/60 rounded p-2">
+                    ℹ️ El <strong>Precio flete</strong> abajo sigue siendo tu ingreso NETO. Los campos de tarifa bruta y comisión son informativos — no se suman ni se restan.
                   </div>
                   <div>
-                    <label className={labelCls}>Comisión externa (Gs.)</label>
-                    <input type="number" value={form.comision_externa || ""}
-                      onChange={(e) => setForm({ ...form, comision_externa: parseInt(e.target.value) || 0 })}
-                      placeholder="350000" className={inputCls} />
-                    <div className="text-[10px] text-purple-700 mt-1">{fmtGs(form.comision_externa || 0)} · quien absorbe (TL, otro)</div>
+                    <label className={labelCls}>Cliente final / dueño de la carga *</label>
+                    <select value={form.cliente_final_id} onChange={(e) => setForm({ ...form, cliente_final_id: e.target.value })} className={inputCls}>
+                      <option value="">— Elegir cliente final —</option>
+                      {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                    </select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className={labelCls}>Tarifa bruta al cliente final (Gs.)</label>
+                      <input type="number" value={form.tarifa_bruta_cliente_final || ""}
+                        onChange={(e) => setForm({ ...form, tarifa_bruta_cliente_final: parseInt(e.target.value) || 0 })}
+                        placeholder="5950000" className={inputCls} />
+                      <div className="text-[10px] text-purple-700 mt-1">{fmtGs(form.tarifa_bruta_cliente_final || 0)} · informativo</div>
+                    </div>
+                    <div>
+                      <label className={labelCls}>Comisión externa (Gs.)</label>
+                      <input type="number" value={form.comision_externa || ""}
+                        onChange={(e) => setForm({ ...form, comision_externa: parseInt(e.target.value) || 0 })}
+                        placeholder="350000" className={inputCls} />
+                      <div className="text-[10px] text-purple-700 mt-1">{fmtGs(form.comision_externa || 0)} · quien absorbe (TL, otro)</div>
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          )}
           <div className="bg-teus-hover_light border border-teus-border_light rounded-xl p-4">
             <div className="flex items-center gap-2 mb-3">
               <MapPin className="w-4 h-4 text-teus-accent" />
@@ -701,22 +722,31 @@ function ViajeModal({
                     onChange={(e) => setForm({ ...form, chofer_externo_nombre: e.target.value })}
                     placeholder="Ej: JORGE / MATIAS / etc." className={inputCls} />
                 </div>
-                <div>
-                  <label className={labelCls}>Precio pagado al aliado (Gs)</label>
-                  <input type="number" value={form.precio_pagado_al_externo || ""}
-                    onChange={(e) => {
-                      const nuevoPagado = parseInt(e.target.value) || 0;
-                      const nuevaComision = form.vehiculo_externo_id === "TL" ? Math.round(nuevoPagado * 0.05) : form.comision_recibida;
-                      setForm({ ...form, precio_pagado_al_externo: nuevoPagado, comision_recibida: nuevaComision });
-                    }}
-                    className={inputCls} />
-                </div>
-                <div>
-                  <label className={labelCls}>Comisión recibida (auto TL)</label>
-                  <input type="number" value={form.comision_recibida || ""}
-                    onChange={(e) => setForm({ ...form, comision_recibida: parseInt(e.target.value) || 0 })}
-                    className={inputCls} />
-                </div>
+                {isAdmin && (
+                  <>
+                    <div>
+                      <label className={labelCls}>Precio pagado al aliado (Gs)</label>
+                      <input type="number" value={form.precio_pagado_al_externo || ""}
+                        onChange={(e) => {
+                          const nuevoPagado = parseInt(e.target.value) || 0;
+                          const nuevaComision = form.vehiculo_externo_id === "TL" ? Math.round(nuevoPagado * 0.05) : form.comision_recibida;
+                          setForm({ ...form, precio_pagado_al_externo: nuevoPagado, comision_recibida: nuevaComision });
+                        }}
+                        className={inputCls} />
+                    </div>
+                    <div>
+                      <label className={labelCls}>Comisión recibida (auto TL)</label>
+                      <input type="number" value={form.comision_recibida || ""}
+                        onChange={(e) => setForm({ ...form, comision_recibida: parseInt(e.target.value) || 0 })}
+                        className={inputCls} />
+                    </div>
+                  </>
+                )}
+                {!isAdmin && (
+                  <div className="col-span-2 bg-white/60 border border-orange-200 rounded-lg px-3 py-2 text-[11px] text-orange-900">
+                    💡 El administrador va a completar el precio pagado y la comisión más tarde.
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -741,15 +771,30 @@ function ViajeModal({
                 <label className={labelCls}>Gs / Litro</label>
                 <input type="number" value={form.gs_por_litro} onChange={(e) => setForm({ ...form, gs_por_litro: parseInt(e.target.value) || 0 })} className={inputCls} />
               </div>
-              <div className="col-span-4 mt-1 text-xs text-teus-text_muted">
-                Costo total combustible: <span className="font-bold text-teus-text_dark">{fmtGs(costoCombustible)}</span>
+              {isAdmin && (
+                <div className="col-span-4 mt-1 text-xs text-teus-text_muted">
+                  Costo total combustible: <span className="font-bold text-teus-text_dark">{fmtGs(costoCombustible)}</span>
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="bg-teus-hover_light border border-teus-border_light rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="text-sm font-bold text-teus-text_dark">💵 Viático al chofer</div>
+              <div className="text-[10px] text-teus-text_muted">(efectivo entregado al chofer para este viaje)</div>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className={labelCls}>Viático (Gs.)</label>
+                <input type="number" value={form.viatico} onChange={(e) => setForm({ ...form, viatico: parseInt(e.target.value) || 0 })} className={inputCls} />
+                <div className="text-[10px] text-teus-text_muted mt-1">{fmtGs(form.viatico)}</div>
               </div>
             </div>
           </div>
           <div className="bg-teus-hover_light border border-teus-border_light rounded-xl p-4">
             <div className="flex items-center gap-2 mb-3">
               <div className="text-sm font-bold text-teus-text_dark">🛢️ Insumos extra en la estación (opcional)</div>
-              <div className="text-[10px] text-teus-text_muted">(aceite, refrigerante, líquido de freno, agua destilada — se suma al débito con David)</div>
+              <div className="text-[10px] text-teus-text_muted">(aceite, refrigerante, líquido de freno, agua destilada)</div>
             </div>
             <div className="grid grid-cols-3 gap-3">
               <div className="col-span-2">
@@ -768,93 +813,92 @@ function ViajeModal({
               </div>
             </div>
           </div>
-          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-            <div className="flex items-center gap-2 mb-3">
-              <div className="text-sm font-bold text-teus-text_dark">💰 Ingresos extras (opcional)</div>
-              <div className="text-[10px] text-teus-text_muted">(estadías, reintegros peaje, adicionales — cobra el cliente, suma a tu utilidad)</div>
-            </div>
-            <div className="grid grid-cols-4 gap-3">
-              <div>
-                <label className={labelCls}>Tipo</label>
-                <select value={form.tipo_ingreso_extra || ""}
-                  onChange={(e) => setForm({ ...form, tipo_ingreso_extra: e.target.value, dias_detenido_cliente: e.target.value === "estadia" ? form.dias_detenido_cliente : 0 })}
-                  className={inputCls}>
-                  <option value="">— No especificado —</option>
-                  {TIPOS_INGRESO_EXTRA.map(t => <option key={t.valor} value={t.valor}>{t.label}</option>)}
-                </select>
+          {isAdmin && (
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="text-sm font-bold text-teus-text_dark">💰 Ingresos extras (opcional)</div>
+                <div className="text-[10px] text-teus-text_muted">(estadías, reintegros peaje, adicionales — cobra el cliente, suma a tu utilidad)</div>
               </div>
-              <div className={form.tipo_ingreso_extra === "estadia" ? "" : "col-span-2"}>
-                <label className={labelCls}>Descripción</label>
-                <input type="text" value={form.ingresos_extras_detalle || ""}
-                  onChange={(e) => setForm({ ...form, ingresos_extras_detalle: e.target.value })}
-                  placeholder={form.tipo_ingreso_extra === "estadia" ? "Ej: Estadía 3 días puerto" : "Ej: Reintegro peajes"}
-                  className={inputCls} />
-              </div>
-              {form.tipo_ingreso_extra === "estadia" && (
+              <div className="grid grid-cols-4 gap-3">
                 <div>
-                  <label className={labelCls}>Días detenido cliente</label>
-                  <input type="number" min="0" value={form.dias_detenido_cliente || ""}
-                    onChange={(e) => setForm({ ...form, dias_detenido_cliente: parseInt(e.target.value) || 0 })}
-                    placeholder="0" className={inputCls} />
+                  <label className={labelCls}>Tipo</label>
+                  <select value={form.tipo_ingreso_extra || ""}
+                    onChange={(e) => setForm({ ...form, tipo_ingreso_extra: e.target.value, dias_detenido_cliente: e.target.value === "estadia" ? form.dias_detenido_cliente : 0 })}
+                    className={inputCls}>
+                    <option value="">— No especificado —</option>
+                    {TIPOS_INGRESO_EXTRA.map(t => <option key={t.valor} value={t.valor}>{t.label}</option>)}
+                  </select>
                 </div>
-              )}
-              <div>
-                <label className={labelCls}>Monto (Gs.)</label>
-                <input type="number" value={form.ingresos_extras_monto || ""}
-                  onChange={(e) => setForm({ ...form, ingresos_extras_monto: parseInt(e.target.value) || 0 })}
-                  className={inputCls} />
-                <div className="text-[10px] text-blue-700 font-bold mt-1">{fmtGs(form.ingresos_extras_monto || 0)}</div>
-              </div>
-            </div>
-          </div>
-          <div className="bg-teus-hover_light border border-teus-border_light rounded-xl p-4">
-            <div className="flex items-center gap-2 mb-3">
-              <DollarSign className="w-4 h-4 text-teus-accent" />
-              <div className="text-sm font-bold text-teus-text_dark">Precios y utilidad</div>
-            </div>
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className={labelCls}>Precio flete (Gs.) *</label>
-                <input type="number" value={form.precio_flete || ""} onChange={(e) => {
-                const nuevoFlete = parseInt(e.target.value) || 0;
-                setForm({ ...form, precio_flete: nuevoFlete });
-              }} required className={inputCls} />
-                <div className="text-[10px] text-teus-accent font-bold mt-1">{fmtGs(form.precio_flete)}</div>
-              </div>
-              <div>
-                <label className={labelCls}>Viático</label>
-                <input type="number" value={form.viatico} onChange={(e) => setForm({ ...form, viatico: parseInt(e.target.value) || 0 })} className={inputCls} />
-                <div className="text-[10px] text-teus-text_muted mt-1">{fmtGs(form.viatico)}</div>
-              </div>
-              <div>
-                <label className={labelCls}>Otros costos</label>
-                <input type="number" value={form.otros_costos} onChange={(e) => setForm({ ...form, otros_costos: parseInt(e.target.value) || 0 })} className={inputCls} />
-                <div className="text-[10px] text-teus-text_muted mt-1">{fmtGs(form.otros_costos)}</div>
-              </div>
-            </div>
-            <div className="mt-4 grid grid-cols-3 gap-3">
-              <div className="bg-white border border-teus-border_light rounded-lg p-3">
-                <div className="text-[9px] uppercase tracking-wider text-teus-text_muted font-bold">Ingresos</div>
-                <div className="text-sm font-bold text-teus-text_dark mt-1">{fmtGs(ingresosTotales)}</div>
-                {(form.ingresos_extras_monto || 0) > 0 && (
-                  <div className="text-[9px] text-blue-700 mt-0.5">Flete {fmtGs(form.precio_flete)} + extras {fmtGs(form.ingresos_extras_monto)}</div>
+                <div className={form.tipo_ingreso_extra === "estadia" ? "" : "col-span-2"}>
+                  <label className={labelCls}>Descripción</label>
+                  <input type="text" value={form.ingresos_extras_detalle || ""}
+                    onChange={(e) => setForm({ ...form, ingresos_extras_detalle: e.target.value })}
+                    placeholder={form.tipo_ingreso_extra === "estadia" ? "Ej: Estadía 3 días puerto" : "Ej: Reintegro peajes"}
+                    className={inputCls} />
+                </div>
+                {form.tipo_ingreso_extra === "estadia" && (
+                  <div>
+                    <label className={labelCls}>Días detenido cliente</label>
+                    <input type="number" min="0" value={form.dias_detenido_cliente || ""}
+                      onChange={(e) => setForm({ ...form, dias_detenido_cliente: parseInt(e.target.value) || 0 })}
+                      placeholder="0" className={inputCls} />
+                  </div>
                 )}
-              </div>
-              <div className="bg-white border border-teus-border_light rounded-lg p-3">
-                <div className="text-[9px] uppercase tracking-wider text-teus-text_muted font-bold">Costos totales</div>
-                <div className="text-sm font-bold text-teus-danger mt-1">− {fmtGs(costoCombustible + form.viatico + form.otros_costos + (form.insumos_estacion_monto || 0))}</div>
-              </div>
-              <div className="teus-highlight-bg border rounded-lg p-3">
-                <div className="text-[9px] uppercase tracking-wider text-teus-accent font-black">Utilidad bruta</div>
-                <div className={`text-sm font-black mt-1 ${utilidadBruta >= 0 ? "text-teus-text_dark" : "text-teus-danger"}`}>
-                  {fmtGs(utilidadBruta)}
-                </div>
-                <div className={`text-[10px] font-bold mt-0.5 ${utilidadBruta >= 0 ? "text-teus-accent" : "text-teus-danger"}`}>
-                  {margenPct.toFixed(1)}% margen
+                <div>
+                  <label className={labelCls}>Monto (Gs.)</label>
+                  <input type="number" value={form.ingresos_extras_monto || ""}
+                    onChange={(e) => setForm({ ...form, ingresos_extras_monto: parseInt(e.target.value) || 0 })}
+                    className={inputCls} />
+                  <div className="text-[10px] text-blue-700 font-bold mt-1">{fmtGs(form.ingresos_extras_monto || 0)}</div>
                 </div>
               </div>
             </div>
-          </div>
+          )}
+          {isAdmin && (
+            <div className="bg-teus-hover_light border border-teus-border_light rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <DollarSign className="w-4 h-4 text-teus-accent" />
+                <div className="text-sm font-bold text-teus-text_dark">Precios y utilidad</div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>Precio flete (Gs.) *</label>
+                  <input type="number" value={form.precio_flete || ""} onChange={(e) => {
+                    const nuevoFlete = parseInt(e.target.value) || 0;
+                    setForm({ ...form, precio_flete: nuevoFlete });
+                  }} required={isAdmin} className={inputCls} />
+                  <div className="text-[10px] text-teus-accent font-bold mt-1">{fmtGs(form.precio_flete)}</div>
+                </div>
+                <div>
+                  <label className={labelCls}>Otros costos</label>
+                  <input type="number" value={form.otros_costos} onChange={(e) => setForm({ ...form, otros_costos: parseInt(e.target.value) || 0 })} className={inputCls} />
+                  <div className="text-[10px] text-teus-text_muted mt-1">{fmtGs(form.otros_costos)}</div>
+                </div>
+              </div>
+              <div className="mt-4 grid grid-cols-3 gap-3">
+                <div className="bg-white border border-teus-border_light rounded-lg p-3">
+                  <div className="text-[9px] uppercase tracking-wider text-teus-text_muted font-bold">Ingresos</div>
+                  <div className="text-sm font-bold text-teus-text_dark mt-1">{fmtGs(ingresosTotales)}</div>
+                  {(form.ingresos_extras_monto || 0) > 0 && (
+                    <div className="text-[9px] text-blue-700 mt-0.5">Flete {fmtGs(form.precio_flete)} + extras {fmtGs(form.ingresos_extras_monto)}</div>
+                  )}
+                </div>
+                <div className="bg-white border border-teus-border_light rounded-lg p-3">
+                  <div className="text-[9px] uppercase tracking-wider text-teus-text_muted font-bold">Costos totales</div>
+                  <div className="text-sm font-bold text-teus-danger mt-1">− {fmtGs(costoCombustible + form.viatico + form.otros_costos + (form.insumos_estacion_monto || 0))}</div>
+                </div>
+                <div className="teus-highlight-bg border rounded-lg p-3">
+                  <div className="text-[9px] uppercase tracking-wider text-teus-accent font-black">Utilidad bruta</div>
+                  <div className={`text-sm font-black mt-1 ${utilidadBruta >= 0 ? "text-teus-text_dark" : "text-teus-danger"}`}>
+                    {fmtGs(utilidadBruta)}
+                  </div>
+                  <div className={`text-[10px] font-bold mt-0.5 ${utilidadBruta >= 0 ? "text-teus-accent" : "text-teus-danger"}`}>
+                    {margenPct.toFixed(1)}% margen
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
           <div>
             <label className={labelCls}>Observaciones</label>
             <textarea value={form.observacion} onChange={(e) => setForm({ ...form, observacion: e.target.value })} rows={2} placeholder="Notas del viaje..." className={inputCls + " resize-none"} />
