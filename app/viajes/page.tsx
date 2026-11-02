@@ -5,13 +5,14 @@ import { createClient } from "@/lib/supabase/client";
 import { useUserRole } from "@/lib/supabase/useUserRole";
 import {
   Plus, Edit2, Trash2, X, ClipboardList, Search, Loader2,
-  Calendar, TrendingUp, DollarSign, Truck, MapPin,
+  Calendar, TrendingUp, DollarSign, Truck, MapPin, UserCog,
 } from "lucide-react";
 type Vehiculo = { id: string; nombre_equipo: string; tipo: string; chapa: string };
 type Chofer = { id: string; nombre_completo: string; vehiculo_asignado_id?: string | null };
 type Cliente = { id: string; nombre: string; credito_dias: number };
 type Ruta = { id: string; origen: string; destino: string; km_ida: number; km_vuelta: number; km_total: number };
 type Proveedor = { id: string; nombre: string; gs_por_litro: number | null };
+type UsuarioPerfil = { id: string; nombre_completo: string | null; rol: string };
 type Viaje = {
   id: string;
   fecha: string;
@@ -47,6 +48,9 @@ type Viaje = {
   tarifa_bruta_cliente_final: number;
   comision_externa: number;
   factura_id: string | null;
+  creado_por: string | null;
+  modificado_por: string | null;
+  modificado_at: string | null;
   factura?: { nro_factura: string } | null;
   vehiculo?: Vehiculo | null;
   chofer?: Chofer | null;
@@ -85,6 +89,7 @@ export default function ViajesPage() {
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [rutas, setRutas] = useState<Ruta[]>([]);
   const [proveedores, setProveedores] = useState<Proveedor[]>([]);
+  const [perfiles, setPerfiles] = useState<Map<string, UsuarioPerfil>>(new Map());
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Viaje | null>(null);
@@ -102,6 +107,7 @@ export default function ViajesPage() {
       { data: cliData },
       { data: rutData },
       { data: provData },
+      { data: perfData },
     ] = await Promise.all([
       supabase
         .from("viajes")
@@ -114,6 +120,7 @@ export default function ViajesPage() {
       supabase.from("clientes").select("id, nombre, credito_dias").eq("activo", true).order("nombre"),
       supabase.from("rutas").select("*").eq("activa", true).order("origen"),
       supabase.from("proveedores").select("id, nombre, gs_por_litro").eq("tipo", "combustible").eq("activo", true).order("nombre"),
+      supabase.from("usuarios_perfil").select("id, nombre_completo, rol"),
     ]);
     if (viajesData) setViajes(viajesData as Viaje[]);
     if (vehData) setVehiculos(vehData as Vehiculo[]);
@@ -121,6 +128,11 @@ export default function ViajesPage() {
     if (cliData) setClientes(cliData as Cliente[]);
     if (rutData) setRutas(rutData as Ruta[]);
     if (provData) setProveedores(provData as Proveedor[]);
+    if (perfData) {
+      const m = new Map<string, UsuarioPerfil>();
+      perfData.forEach((p: any) => m.set(p.id, p));
+      setPerfiles(m);
+    }
     setLoading(false);
   }
   useEffect(() => { loadData(); }, [year, month]);
@@ -160,6 +172,23 @@ export default function ViajesPage() {
     if (!confirm(`¿Eliminar el viaje del ${v.fecha}?\n(${v.origen} → ${v.destino}, ${v.vehiculo?.nombre_equipo})\n\nEsta acción no se puede deshacer.`)) return;
     await supabase.from("viajes").delete().eq("id", v.id);
     loadData();
+  }
+  function perfilDe(id: string | null): UsuarioPerfil | null {
+    if (!id) return null;
+    return perfiles.get(id) || null;
+  }
+  function ChipCoordinador({ perfil, tipo }: { perfil: UsuarioPerfil; tipo: "creado" | "modificado" }) {
+    const icono = tipo === "creado" ? "✨" : "✎";
+    const label = tipo === "creado" ? "Creado por" : "Modif. por";
+    const bg = tipo === "creado" ? "bg-amber-100 text-amber-800 border-amber-300" : "bg-purple-100 text-purple-800 border-purple-300";
+    return (
+      <span
+        title={`${label} ${perfil.nombre_completo || "Usuario"}`}
+        className={`inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${bg} ml-1`}
+      >
+        {icono} {perfil.nombre_completo || "Coord."}
+      </span>
+    );
   }
   return (
     <div className="px-8 py-6 pb-16">
@@ -257,70 +286,95 @@ export default function ViajesPage() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((v) => (
-                  <tr key={v.id} className="border-b border-teus-border_light/60 hover:bg-teus-hover_light transition">
-                    <td className="px-3 py-3 text-teus-text_dark font-semibold text-xs whitespace-nowrap">
-                      {(() => { const [y,m,d] = v.fecha.split("T")[0].split("-"); return `${d}/${m}`; })()}
-                    </td>
-                    <td className="px-3 py-3 font-bold text-teus-text_dark">{v.vehiculo?.nombre_equipo || "—"}</td>
-                    <td className="px-3 py-3 text-xs text-teus-text_muted">{v.chofer?.nombre_completo || "—"}</td>
-                    <td className="px-3 py-3 text-xs text-teus-text_dark font-semibold">
-                      {v.cliente?.nombre || "—"}
-                      {isAdmin && v.cliente_final?.nombre && (
-                        <div className="text-[9px] text-purple-700 font-bold mt-0.5">→ Final: {v.cliente_final.nombre}</div>
+                {filtered.map((v) => {
+                  const creador = perfilDe(v.creado_por);
+                  const modificador = perfilDe(v.modificado_por);
+                  const creadorEsCoord = creador?.rol === "coordinador";
+                  const modificadorEsCoord =
+                    modificador?.rol === "coordinador" &&
+                    v.modificado_por !== v.creado_por;
+                  return (
+                    <tr key={v.id} className="border-b border-teus-border_light/60 hover:bg-teus-hover_light transition">
+                      <td className="px-3 py-3 text-teus-text_dark font-semibold text-xs whitespace-nowrap">
+                        <div className="flex items-center flex-wrap gap-y-1">
+                          {(() => { const [y,m,d] = v.fecha.split("T")[0].split("-"); return <span>{d}/{m}</span>; })()}
+                          {isAdmin && creadorEsCoord && creador && (
+                            <ChipCoordinador perfil={creador} tipo="creado" />
+                          )}
+                          {isAdmin && modificadorEsCoord && modificador && (
+                            <ChipCoordinador perfil={modificador} tipo="modificado" />
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-3 py-3 font-bold text-teus-text_dark">{v.vehiculo?.nombre_equipo || "—"}</td>
+                      <td className="px-3 py-3 text-xs text-teus-text_muted">{v.chofer?.nombre_completo || "—"}</td>
+                      <td className="px-3 py-3 text-xs text-teus-text_dark font-semibold">
+                        {v.cliente?.nombre || "—"}
+                        {isAdmin && v.cliente_final?.nombre && (
+                          <div className="text-[9px] text-purple-700 font-bold mt-0.5">→ Final: {v.cliente_final.nombre}</div>
+                        )}
+                      </td>
+                      <td className="px-3 py-3 text-xs text-teus-text_muted">
+                        <span className="font-semibold text-teus-text_dark">{v.origen}</span>
+                        <span className="mx-1">→</span>
+                        <span className="font-semibold text-teus-text_dark">{v.destino}</span>
+                        {v.km_viaje ? <span className="ml-2 text-teus-accent font-bold">{v.km_viaje}km</span> : null}
+                      </td>
+                      <td className="px-3 py-3 font-mono text-[10px] text-teus-text_muted">{v.nro_contenedor || "—"}</td>
+                      {isAdmin && (
+                        <td className="px-3 py-3">
+                          {v.factura?.nro_factura ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold px-2 py-1 rounded bg-blue-50 text-blue-700 border border-blue-200">
+                              📄 {v.factura.nro_factura}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-teus-text_soft">—</span>
+                          )}
+                        </td>
                       )}
-                    </td>
-                    <td className="px-3 py-3 text-xs text-teus-text_muted">
-                      <span className="font-semibold text-teus-text_dark">{v.origen}</span>
-                      <span className="mx-1">→</span>
-                      <span className="font-semibold text-teus-text_dark">{v.destino}</span>
-                      {v.km_viaje ? <span className="ml-2 text-teus-accent font-bold">{v.km_viaje}km</span> : null}
-                    </td>
-                    <td className="px-3 py-3 font-mono text-[10px] text-teus-text_muted">{v.nro_contenedor || "—"}</td>
-                    {isAdmin && (
+                      {isAdmin && (
+                        <td className="px-3 py-3 text-right font-semibold text-teus-text_dark whitespace-nowrap">
+                          {fmtGsShort(v.precio_flete)}
+                          {(v.ingresos_extras_monto || 0) > 0 && (
+                            <div className="text-[9px] text-blue-600 font-bold">+{fmtGsShort(v.ingresos_extras_monto)} extra</div>
+                          )}
+                        </td>
+                      )}
+                      {isAdmin && (
+                        <td className="px-3 py-3 text-right font-bold text-teus-accent whitespace-nowrap">{fmtGsShort(v.utilidad_bruta)}</td>
+                      )}
                       <td className="px-3 py-3">
-                        {v.factura?.nro_factura ? (
-                          <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold px-2 py-1 rounded bg-blue-50 text-blue-700 border border-blue-200">
-                            📄 {v.factura.nro_factura}
-                          </span>
-                        ) : (
-                          <span className="text-xs text-teus-text_soft">—</span>
-                        )}
+                        <span className={`inline-flex items-center text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded ${ESTADOS[v.estado]?.classes || ""}`}>
+                          {ESTADOS[v.estado]?.label || v.estado}
+                        </span>
                       </td>
-                    )}
-                    {isAdmin && (
-                      <td className="px-3 py-3 text-right font-semibold text-teus-text_dark whitespace-nowrap">
-                        {fmtGsShort(v.precio_flete)}
-                        {(v.ingresos_extras_monto || 0) > 0 && (
-                          <div className="text-[9px] text-blue-600 font-bold">+{fmtGsShort(v.ingresos_extras_monto)} extra</div>
-                        )}
+                      <td className="px-3 py-3 text-right">
+                        <div className="inline-flex gap-1">
+                          <button onClick={() => { setEditing(v); setShowModal(true); }} className="p-1.5 rounded-lg hover:bg-teus-accent/10 text-teus-text_muted hover:text-teus-accent transition" title="Editar"><Edit2 className="w-4 h-4" /></button>
+                          {isAdmin && (
+                            <button onClick={() => deleteViaje(v)} className="p-1.5 rounded-lg text-teus-text_muted hover:text-teus-danger hover:bg-teus-danger-light transition" title="Eliminar"><Trash2 className="w-4 h-4" /></button>
+                          )}
+                        </div>
                       </td>
-                    )}
-                    {isAdmin && (
-                      <td className="px-3 py-3 text-right font-bold text-teus-accent whitespace-nowrap">{fmtGsShort(v.utilidad_bruta)}</td>
-                    )}
-                    <td className="px-3 py-3">
-                      <span className={`inline-flex items-center text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded ${ESTADOS[v.estado]?.classes || ""}`}>
-                        {ESTADOS[v.estado]?.label || v.estado}
-                      </span>
-                    </td>
-                    <td className="px-3 py-3 text-right">
-                      <div className="inline-flex gap-1">
-                        <button onClick={() => { setEditing(v); setShowModal(true); }} className="p-1.5 rounded-lg hover:bg-teus-accent/10 text-teus-text_muted hover:text-teus-accent transition" title="Editar"><Edit2 className="w-4 h-4" /></button>
-                        {isAdmin && (
-                          <button onClick={() => deleteViaje(v)} className="p-1.5 rounded-lg text-teus-text_muted hover:text-teus-danger hover:bg-teus-danger-light transition" title="Eliminar"><Trash2 className="w-4 h-4" /></button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
       </div>
-      <div className="text-xs text-teus-text_soft mt-4 px-1">
-        Mostrando {filtered.length} viaje{filtered.length !== 1 ? "s" : ""} · {MESES_ES[month-1]} {year}
+      <div className="text-xs text-teus-text_soft mt-4 px-1 flex items-center gap-3 flex-wrap">
+        <span>Mostrando {filtered.length} viaje{filtered.length !== 1 ? "s" : ""} · {MESES_ES[month-1]} {year}</span>
+        {isAdmin && (
+          <span className="inline-flex items-center gap-1 text-[10px] text-teus-text_muted">
+            <span className="inline-block px-1.5 py-0.5 bg-amber-100 text-amber-800 border border-amber-300 rounded-full font-bold">✨ chip</span>
+            = creado por el coordinador
+            <span className="mx-2">·</span>
+            <span className="inline-block px-1.5 py-0.5 bg-purple-100 text-purple-800 border border-purple-300 rounded-full font-bold">✎ chip</span>
+            = modificado por el coordinador
+          </span>
+        )}
       </div>
       {showModal && (
         <ViajeModal
