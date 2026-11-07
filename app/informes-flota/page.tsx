@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createBrowserClient } from "@supabase/ssr";
 import { useUserRole } from "@/lib/supabase/useUserRole";
+import { AlertCircle, Plus, Search, X, Trash2, Pencil } from "lucide-react";
 
 // ============================================================
 // TIPOS
@@ -10,13 +11,15 @@ import { useUserRole } from "@/lib/supabase/useUserRole";
 
 type Chofer = {
   id: string;
-  nombre: string;
-  vehiculo_id: string | null;
+  nombre_completo: string;
+  vehiculo_asignado_id: string | null;
 };
 
 type Vehiculo = {
   id: string;
-  patente: string;
+  chapa: string;
+  nombre_equipo: string | null;
+  alias: string | null;
   marca: string | null;
   modelo: string | null;
 };
@@ -67,18 +70,16 @@ const ESTADO_LABEL: Record<Informe["estado"], string> = {
   cancelado: "Cancelado",
 };
 
-const ESTADO_COLOR: Record<Informe["estado"], string> = {
-  pendiente: "bg-yellow-100 text-yellow-800 border-yellow-300",
-  en_proceso: "bg-blue-100 text-blue-800 border-blue-300",
-  solucionado: "bg-green-100 text-green-800 border-green-300",
-  cancelado: "bg-gray-200 text-gray-700 border-gray-400",
-};
-
-const ESTADO_EMOJI: Record<Informe["estado"], string> = {
-  pendiente: "🟡",
-  en_proceso: "🔵",
-  solucionado: "🟢",
-  cancelado: "⚫",
+// Pill styles matching the system palette (same look as Viajes / Facturas)
+const ESTADO_PILL: Record<Informe["estado"], string> = {
+  pendiente:
+    "bg-teus-warn-light text-teus-warn border border-amber-200",
+  en_proceso:
+    "bg-blue-50 text-blue-700 border border-blue-200",
+  solucionado:
+    "bg-teus-success-light text-teus-success border border-emerald-200",
+  cancelado:
+    "bg-gray-100 text-teus-text_muted border border-gray-200",
 };
 
 function formatearFecha(iso: string): string {
@@ -86,8 +87,14 @@ function formatearFecha(iso: string): string {
   return `${d}/${m}/${a}`;
 }
 
+function nombreVehiculo(v?: Vehiculo): string {
+  if (!v) return "—";
+  const alias = v.alias || v.nombre_equipo;
+  return alias ? `${v.chapa} · ${alias}` : v.chapa;
+}
+
 // ============================================================
-// CHIP coordinador/admin que creó o modificó
+// CHIP coordinador (solo visible a admin, solo si fue coordinador)
 // ============================================================
 
 function ChipUsuario({
@@ -96,19 +103,17 @@ function ChipUsuario({
   esAdminViendo,
 }: {
   perfil?: UsuarioPerfil;
-  label: "Creado" | "Modificado";
+  label: "C" | "M";
   esAdminViendo: boolean;
 }) {
-  // Solo admin ve chips, y solo cuando fue un coordinador
   if (!esAdminViendo || !perfil || perfil.rol !== "coordinador") return null;
-
-  const nombre = perfil.nombre_completo || perfil.email;
+  const nombre = (perfil.nombre_completo || perfil.email).split(" ")[0];
   return (
     <span
-      className="inline-flex items-center gap-1 text-[10px] bg-purple-100 text-purple-700 border border-purple-300 rounded px-1.5 py-0.5 ml-1"
-      title={`${label} por ${nombre}`}
+      className="inline-flex items-center gap-1 text-[10px] bg-purple-50 text-purple-700 border border-purple-200 rounded px-1.5 py-0.5 ml-1 font-medium"
+      title={`${label === "C" ? "Creado" : "Modificado"} por ${perfil.nombre_completo || perfil.email}`}
     >
-      👤 {label === "Creado" ? "C" : "M"}:{nombre.split(" ")[0]}
+      {label}:{nombre}
     </span>
   );
 }
@@ -123,12 +128,11 @@ export default function InformesFlotaPage() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
-  const { rol, loading: rolLoading, isAdmin } = useUserRole();
+  const { loading: rolLoading, isAdmin } = useUserRole();
 
   const [informes, setInformes] = useState<Informe[]>([]);
   const [choferes, setChoferes] = useState<Chofer[]>([]);
   const [vehiculos, setVehiculos] = useState<Vehiculo[]>([]);
-  const [perfiles, setPerfiles] = useState<UsuarioPerfil[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [filtroEstado, setFiltroEstado] = useState<EstadoFiltro>("pendiente");
@@ -137,7 +141,6 @@ export default function InformesFlotaPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editando, setEditando] = useState<Informe | null>(null);
 
-  // -------- CARGA INICIAL --------
   useEffect(() => {
     cargarTodo();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -146,8 +149,16 @@ export default function InformesFlotaPage() {
   async function cargarTodo() {
     setLoading(true);
     const [chRes, vRes, pRes, iRes] = await Promise.all([
-      supabase.from("choferes").select("id, nombre, vehiculo_id").order("nombre"),
-      supabase.from("vehiculos").select("id, patente, marca, modelo").order("patente"),
+      supabase
+        .from("choferes")
+        .select("id, nombre_completo, vehiculo_asignado_id")
+        .eq("activo", true)
+        .order("nombre_completo"),
+      supabase
+        .from("vehiculos")
+        .select("id, chapa, nombre_equipo, alias, marca, modelo")
+        .eq("activo", true)
+        .order("chapa"),
       supabase.from("usuarios_perfil").select("id, nombre_completo, email, rol"),
       supabase
         .from("informes_flota")
@@ -161,7 +172,6 @@ export default function InformesFlotaPage() {
     const perfilesData = (pRes.data as UsuarioPerfil[]) || [];
     const informesData = (iRes.data as Informe[]) || [];
 
-    // Enriquecer informes con joins manuales
     const informesEnriquecidos = informesData.map((inf) => ({
       ...inf,
       chofer: choferesData.find((c) => c.id === inf.chofer_id),
@@ -172,12 +182,10 @@ export default function InformesFlotaPage() {
 
     setChoferes(choferesData);
     setVehiculos(vehiculosData);
-    setPerfiles(perfilesData);
     setInformes(informesEnriquecidos);
     setLoading(false);
   }
 
-  // -------- FILTRADO --------
   const informesFiltrados = useMemo(() => {
     let lista = informes;
     if (filtroEstado !== "todos") {
@@ -189,30 +197,29 @@ export default function InformesFlotaPage() {
         (i) =>
           i.numero.toLowerCase().includes(q) ||
           i.descripcion.toLowerCase().includes(q) ||
-          (i.chofer?.nombre || "").toLowerCase().includes(q) ||
-          (i.vehiculo?.patente || "").toLowerCase().includes(q)
+          (i.chofer?.nombre_completo || "").toLowerCase().includes(q) ||
+          (i.vehiculo?.chapa || "").toLowerCase().includes(q) ||
+          (i.vehiculo?.alias || "").toLowerCase().includes(q)
       );
     }
     return lista;
   }, [informes, filtroEstado, busqueda]);
 
-  // -------- CONTADORES POR ESTADO --------
-  const contadores = useMemo(() => {
-    return {
+  const contadores = useMemo(
+    () => ({
       pendiente: informes.filter((i) => i.estado === "pendiente").length,
       en_proceso: informes.filter((i) => i.estado === "en_proceso").length,
       solucionado: informes.filter((i) => i.estado === "solucionado").length,
       cancelado: informes.filter((i) => i.estado === "cancelado").length,
       todos: informes.length,
-    };
-  }, [informes]);
+    }),
+    [informes]
+  );
 
-  // -------- ACCIONES --------
   function abrirNuevo() {
     setEditando(null);
     setModalOpen(true);
   }
-
   function abrirEditar(inf: Informe) {
     setEditando(inf);
     setModalOpen(true);
@@ -223,224 +230,269 @@ export default function InformesFlotaPage() {
       .from("informes_flota")
       .update({ estado: nuevoEstado })
       .eq("id", inf.id);
-    if (error) {
-      alert("Error al cambiar estado: " + error.message);
-      return;
-    }
+    if (error) return alert("Error: " + error.message);
     await cargarTodo();
   }
 
   async function eliminarInforme(inf: Informe) {
     if (!isAdmin) return;
-    if (!confirm(`¿Eliminar informe ${inf.numero}? Esta acción no se puede deshacer.`)) return;
+    if (!confirm(`¿Eliminar informe ${inf.numero}?`)) return;
     const { error } = await supabase.from("informes_flota").delete().eq("id", inf.id);
-    if (error) {
-      alert("Error: " + error.message);
-      return;
-    }
+    if (error) return alert("Error: " + error.message);
     await cargarTodo();
   }
 
   // ============================================================
-  // RENDER
-  // ============================================================
 
   if (rolLoading || loading) {
     return (
-      <div className="p-8 text-center text-gray-500">
-        Cargando informes de flota...
+      <div className="min-h-screen bg-teus-bg_light p-6">
+        <div className="text-teus-text_muted text-sm">Cargando informes...</div>
       </div>
     );
   }
 
   return (
-    <div className="p-4 md:p-6 max-w-7xl mx-auto">
-      {/* HEADER */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-6">
-        <div>
-          <h1 className="text-2xl md:text-3xl font-bold text-gray-800">
-            📋 Informes de Flota
-          </h1>
-          <p className="text-sm text-gray-500 mt-1">
-            Registro de novedades y problemas reportados sobre los equipos
-          </p>
+    <div className="min-h-screen bg-teus-bg_light">
+      <div className="max-w-[1400px] mx-auto px-6 py-6">
+        {/* HEADER */}
+        <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-6">
+          <div className="flex items-start gap-3">
+            <div className="w-11 h-11 rounded-lg bg-teus-accent/10 flex items-center justify-center flex-shrink-0">
+              <AlertCircle className="w-6 h-6 text-teus-accent" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-teus-text_dark leading-tight">
+                Informes de Flota
+              </h1>
+              <p className="text-sm text-teus-text_muted mt-0.5">
+                Registro de novedades y problemas reportados sobre los equipos
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={abrirNuevo}
+            className="inline-flex items-center gap-2 bg-teus-accent hover:bg-teus-accent-2 text-white px-4 py-2.5 rounded-lg font-semibold shadow-accent-glow transition"
+          >
+            <Plus className="w-4 h-4" />
+            Nuevo Informe
+          </button>
         </div>
-        <button
-          onClick={abrirNuevo}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium shadow-sm transition"
-        >
-          + Nuevo informe
-        </button>
-      </div>
 
-      {/* TARJETAS DE ESTADO (clickeables = filtro rápido) */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
-        {(["pendiente", "en_proceso", "solucionado", "cancelado", "todos"] as EstadoFiltro[]).map(
-          (estado) => {
+        {/* KPI CARDS por estado (clickeables = filtro) */}
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+          {(
+            ["pendiente", "en_proceso", "solucionado", "cancelado", "todos"] as EstadoFiltro[]
+          ).map((estado) => {
             const activo = filtroEstado === estado;
             const label =
-              estado === "todos" ? "Todos" : ESTADO_LABEL[estado as Informe["estado"]];
-            const emoji = estado === "todos" ? "📊" : ESTADO_EMOJI[estado as Informe["estado"]];
+              estado === "todos" ? "Total" : ESTADO_LABEL[estado as Informe["estado"]];
+            const num = contadores[estado];
+
+            const acc =
+              estado === "pendiente"
+                ? "text-teus-warn"
+                : estado === "en_proceso"
+                ? "text-blue-600"
+                : estado === "solucionado"
+                ? "text-teus-success"
+                : estado === "cancelado"
+                ? "text-teus-text_muted"
+                : "text-teus-text_dark";
+
             return (
               <button
                 key={estado}
                 onClick={() => setFiltroEstado(estado)}
-                className={`p-3 rounded-lg border-2 transition text-left ${
+                className={`bg-teus-card_light rounded-xl shadow-card hover:shadow-card-hover border transition text-left p-4 ${
                   activo
-                    ? "border-blue-500 bg-blue-50 shadow-sm"
-                    : "border-gray-200 bg-white hover:border-gray-300"
+                    ? "border-teus-accent ring-2 ring-teus-accent/20"
+                    : "border-teus-border_light"
                 }`}
               >
-                <div className="text-xs text-gray-500 flex items-center gap-1">
-                  <span>{emoji}</span>
-                  <span>{label}</span>
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-teus-text_soft">
+                  {label}
                 </div>
-                <div className="text-2xl font-bold text-gray-800 mt-1">
-                  {contadores[estado]}
-                </div>
+                <div className={`text-3xl font-bold mt-1 ${acc}`}>{num}</div>
               </button>
             );
-          }
+          })}
+        </div>
+
+        {/* BÚSQUEDA */}
+        <div className="bg-teus-card_light rounded-xl shadow-card border border-teus-border_light p-4 mb-4">
+          <div className="relative">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-teus-text_soft" />
+            <input
+              type="text"
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+              placeholder="Buscar por número, descripción, chofer o chapa..."
+              className="w-full pl-10 pr-3 py-2 bg-teus-bg_light border border-teus-border_light rounded-lg text-sm text-teus-text_dark placeholder:text-teus-text_soft focus:outline-none focus:ring-2 focus:ring-teus-accent/30 focus:border-teus-accent"
+            />
+          </div>
+        </div>
+
+        {/* TABLA */}
+        {informesFiltrados.length === 0 ? (
+          <div className="bg-teus-card_light rounded-xl shadow-card border border-teus-border_light p-12 text-center">
+            <AlertCircle className="w-10 h-10 text-teus-text_soft mx-auto mb-3" />
+            <div className="text-teus-text_muted text-sm">
+              No hay informes
+              {filtroEstado !== "todos" &&
+                ` con estado "${ESTADO_LABEL[filtroEstado as Informe["estado"]]}"`}
+              .
+            </div>
+            <button
+              onClick={abrirNuevo}
+              className="inline-flex items-center gap-2 mt-4 text-teus-accent hover:text-teus-accent-2 font-semibold text-sm"
+            >
+              <Plus className="w-4 h-4" />
+              Crear el primero
+            </button>
+          </div>
+        ) : (
+          <div className="bg-teus-card_light rounded-xl shadow-card border border-teus-border_light overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead className="bg-teus-hover_light border-b border-teus-border_light">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-wider text-teus-text_muted">
+                      N°
+                    </th>
+                    <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-wider text-teus-text_muted">
+                      Fecha
+                    </th>
+                    <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-wider text-teus-text_muted">
+                      Chofer
+                    </th>
+                    <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-wider text-teus-text_muted">
+                      Vehículo
+                    </th>
+                    <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-wider text-teus-text_muted">
+                      Equipo
+                    </th>
+                    <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-wider text-teus-text_muted">
+                      Descripción
+                    </th>
+                    <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-wider text-teus-text_muted">
+                      Estado
+                    </th>
+                    <th className="px-4 py-3 text-right text-[10px] font-bold uppercase tracking-wider text-teus-text_muted">
+                      Acciones
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-teus-border_light">
+                  {informesFiltrados.map((inf) => (
+                    <tr
+                      key={inf.id}
+                      className="hover:bg-teus-hover_light transition"
+                    >
+                      <td className="px-4 py-3">
+                        <div className="font-mono text-xs font-semibold text-teus-text_dark">
+                          {inf.numero}
+                        </div>
+                        <div className="mt-0.5">
+                          <ChipUsuario
+                            perfil={inf.creado_por_perfil}
+                            label="C"
+                            esAdminViendo={isAdmin}
+                          />
+                          {inf.modificado_por &&
+                            inf.modificado_por !== inf.creado_por && (
+                              <ChipUsuario
+                                perfil={inf.modificado_por_perfil}
+                                label="M"
+                                esAdminViendo={isAdmin}
+                              />
+                            )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-teus-text_dark whitespace-nowrap">
+                        {formatearFecha(inf.fecha_informe)}
+                      </td>
+                      <td className="px-4 py-3 text-teus-text_dark font-medium">
+                        {inf.chofer?.nombre_completo || "—"}
+                      </td>
+                      <td className="px-4 py-3 text-teus-text_dark">
+                        <span className="font-semibold">{inf.vehiculo?.chapa || "—"}</span>
+                        {(inf.vehiculo?.alias || inf.vehiculo?.nombre_equipo) && (
+                          <span className="text-teus-text_soft">
+                            {" · "}
+                            {inf.vehiculo?.alias || inf.vehiculo?.nombre_equipo}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-teus-text_muted">
+                        {TIPO_EQUIPO_LABEL[inf.tipo_equipo]}
+                      </td>
+                      <td className="px-4 py-3 text-teus-text_dark max-w-xs">
+                        <div className="line-clamp-2" title={inf.descripcion}>
+                          {inf.descripcion}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <select
+                          value={inf.estado}
+                          onChange={(e) =>
+                            cambiarEstadoRapido(inf, e.target.value as Informe["estado"])
+                          }
+                          className={`text-[11px] font-bold uppercase tracking-wider rounded-full px-3 py-1 cursor-pointer outline-none ${ESTADO_PILL[inf.estado]}`}
+                        >
+                          <option value="pendiente">Pendiente</option>
+                          <option value="en_proceso">En proceso</option>
+                          <option value="solucionado">Solucionado</option>
+                          <option value="cancelado">Cancelado</option>
+                        </select>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex justify-end gap-1">
+                          <button
+                            onClick={() => abrirEditar(inf)}
+                            className="p-1.5 text-teus-text_muted hover:text-teus-accent hover:bg-teus-accent/10 rounded transition"
+                            title="Ver / Editar"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          {isAdmin && (
+                            <button
+                              onClick={() => eliminarInforme(inf)}
+                              className="p-1.5 text-teus-text_muted hover:text-teus-danger hover:bg-teus-danger-light rounded transition"
+                              title="Eliminar"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* LEYENDA de chips (solo admin) */}
+        {isAdmin && informes.some((i) => i.creado_por_perfil?.rol === "coordinador") && (
+          <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-teus-text_muted">
+            <span className="inline-flex items-center gap-1">
+              <span className="bg-purple-50 text-purple-700 border border-purple-200 rounded px-1.5 py-0.5 font-medium text-[10px]">
+                C:Nombre
+              </span>
+              <span>creado por coordinador</span>
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <span className="bg-purple-50 text-purple-700 border border-purple-200 rounded px-1.5 py-0.5 font-medium text-[10px]">
+                M:Nombre
+              </span>
+              <span>modificado por coordinador</span>
+            </span>
+          </div>
         )}
       </div>
 
-      {/* BÚSQUEDA */}
-      <div className="mb-4">
-        <input
-          type="text"
-          value={busqueda}
-          onChange={(e) => setBusqueda(e.target.value)}
-          placeholder="Buscar por número, descripción, chofer o patente..."
-          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-        />
-      </div>
-
-      {/* TABLA */}
-      {informesFiltrados.length === 0 ? (
-        <div className="bg-white border border-gray-200 rounded-lg p-10 text-center text-gray-500">
-          No hay informes
-          {filtroEstado !== "todos" && ` con estado "${ESTADO_LABEL[filtroEstado as Informe["estado"]]}"`}.
-          <div className="mt-3">
-            <button
-              onClick={abrirNuevo}
-              className="text-blue-600 hover:underline font-medium"
-            >
-              + Crear el primero
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <th className="px-3 py-2 text-left font-semibold text-gray-700">N°</th>
-                  <th className="px-3 py-2 text-left font-semibold text-gray-700">Fecha</th>
-                  <th className="px-3 py-2 text-left font-semibold text-gray-700">Chofer</th>
-                  <th className="px-3 py-2 text-left font-semibold text-gray-700">Vehículo</th>
-                  <th className="px-3 py-2 text-left font-semibold text-gray-700">Equipo</th>
-                  <th className="px-3 py-2 text-left font-semibold text-gray-700">Descripción</th>
-                  <th className="px-3 py-2 text-left font-semibold text-gray-700">Estado</th>
-                  <th className="px-3 py-2 text-left font-semibold text-gray-700">Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {informesFiltrados.map((inf) => (
-                  <tr key={inf.id} className="border-b border-gray-100 hover:bg-gray-50">
-                    <td className="px-3 py-2 font-mono text-xs text-gray-700">
-                      {inf.numero}
-                      <ChipUsuario
-                        perfil={inf.creado_por_perfil}
-                        label="Creado"
-                        esAdminViendo={isAdmin}
-                      />
-                      {inf.modificado_por && inf.modificado_por !== inf.creado_por && (
-                        <ChipUsuario
-                          perfil={inf.modificado_por_perfil}
-                          label="Modificado"
-                          esAdminViendo={isAdmin}
-                        />
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-gray-700">
-                      {formatearFecha(inf.fecha_informe)}
-                    </td>
-                    <td className="px-3 py-2 text-gray-800">
-                      {inf.chofer?.nombre || "—"}
-                    </td>
-                    <td className="px-3 py-2 text-gray-800 font-medium">
-                      {inf.vehiculo?.patente || "—"}
-                    </td>
-                    <td className="px-3 py-2 text-gray-700">
-                      {TIPO_EQUIPO_LABEL[inf.tipo_equipo]}
-                    </td>
-                    <td className="px-3 py-2 text-gray-700 max-w-xs">
-                      <div className="line-clamp-2" title={inf.descripcion}>
-                        {inf.descripcion}
-                      </div>
-                    </td>
-                    <td className="px-3 py-2">
-                      <select
-                        value={inf.estado}
-                        onChange={(e) =>
-                          cambiarEstadoRapido(inf, e.target.value as Informe["estado"])
-                        }
-                        className={`text-xs font-medium border rounded px-2 py-1 cursor-pointer ${ESTADO_COLOR[inf.estado]}`}
-                      >
-                        <option value="pendiente">🟡 Pendiente</option>
-                        <option value="en_proceso">🔵 En proceso</option>
-                        <option value="solucionado">🟢 Solucionado</option>
-                        <option value="cancelado">⚫ Cancelado</option>
-                      </select>
-                    </td>
-                    <td className="px-3 py-2">
-                      <div className="flex gap-1">
-                        <button
-                          onClick={() => abrirEditar(inf)}
-                          className="text-blue-600 hover:text-blue-800 px-2 py-1 text-xs font-medium"
-                          title="Ver/Editar"
-                        >
-                          Ver
-                        </button>
-                        {isAdmin && (
-                          <button
-                            onClick={() => eliminarInforme(inf)}
-                            className="text-red-600 hover:text-red-800 px-2 py-1 text-xs font-medium"
-                            title="Eliminar"
-                          >
-                            🗑
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* LEYENDA de chips (solo admin) */}
-      {isAdmin && (
-        <div className="mt-4 text-xs text-gray-500 flex flex-wrap gap-3 items-center">
-          <span className="inline-flex items-center gap-1">
-            <span className="bg-purple-100 text-purple-700 border border-purple-300 rounded px-1.5 py-0.5">
-              👤 C:Nombre
-            </span>
-            = creado por coordinador
-          </span>
-          <span className="inline-flex items-center gap-1">
-            <span className="bg-purple-100 text-purple-700 border border-purple-300 rounded px-1.5 py-0.5">
-              👤 M:Nombre
-            </span>
-            = modificado por coordinador
-          </span>
-        </div>
-      )}
-
-      {/* MODAL */}
       {modalOpen && (
         <ModalInforme
           informe={editando}
@@ -492,12 +544,11 @@ function ModalInforme({
   const [observaciones, setObservaciones] = useState(informe?.observaciones || "");
   const [guardando, setGuardando] = useState(false);
 
-  // Al cambiar chofer → autocompletar vehículo
   function onChangeChofer(nuevoChoferId: string) {
     setChoferId(nuevoChoferId);
     const chofer = choferes.find((c) => c.id === nuevoChoferId);
-    if (chofer?.vehiculo_id) {
-      setVehiculoId(chofer.vehiculo_id);
+    if (chofer?.vehiculo_asignado_id) {
+      setVehiculoId(chofer.vehiculo_asignado_id);
     }
   }
 
@@ -524,56 +575,59 @@ function ModalInforme({
 
     setGuardando(false);
 
-    if (error) {
-      alert("Error al guardar: " + error.message);
-      return;
-    }
+    if (error) return alert("Error al guardar: " + error.message);
     onSaved();
   }
 
+  const inputCls =
+    "w-full px-3 py-2 bg-teus-bg_light border border-teus-border_light rounded-lg text-sm text-teus-text_dark focus:outline-none focus:ring-2 focus:ring-teus-accent/30 focus:border-teus-accent";
+  const labelCls =
+    "block text-[11px] font-semibold uppercase tracking-wider text-teus-text_muted mb-1.5";
+
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-        <div className="sticky top-0 bg-white border-b border-gray-200 px-5 py-3 flex items-center justify-between">
-          <h2 className="text-lg font-bold text-gray-800">
-            {esNuevo ? "📋 Nuevo informe de flota" : `📋 Informe ${informe!.numero}`}
-          </h2>
+    <div className="fixed inset-0 bg-teus-text_dark/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-teus-card_light rounded-xl shadow-card-hover w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        {/* Header */}
+        <div className="sticky top-0 bg-teus-card_light border-b border-teus-border_light px-6 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-5 h-5 text-teus-accent" />
+            <h2 className="text-lg font-bold text-teus-text_dark">
+              {esNuevo ? "Nuevo informe" : `Informe ${informe!.numero}`}
+            </h2>
+          </div>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 text-2xl leading-none"
+            className="p-1 text-teus-text_muted hover:text-teus-text_dark hover:bg-teus-hover_light rounded transition"
           >
-            ×
+            <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="p-5 space-y-4">
+        {/* Body */}
+        <div className="p-6 space-y-5">
           {/* Fecha */}
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Fecha del informe *
-            </label>
+            <label className={labelCls}>Fecha del informe *</label>
             <input
               type="date"
               value={fecha}
               onChange={(e) => setFecha(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className={inputCls}
             />
           </div>
 
           {/* Chofer */}
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Chofer *
-            </label>
+            <label className={labelCls}>Chofer *</label>
             <select
               value={choferId}
               onChange={(e) => onChangeChofer(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className={inputCls}
             >
               <option value="">Seleccionar chofer...</option>
               {choferes.map((c) => (
                 <option key={c.id} value={c.id}>
-                  {c.nombre}
+                  {c.nombre_completo}
                 </option>
               ))}
             </select>
@@ -581,18 +635,22 @@ function ModalInforme({
 
           {/* Vehículo */}
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Vehículo * <span className="text-gray-400">(se autocompleta al elegir chofer)</span>
+            <label className={labelCls}>
+              Vehículo *{" "}
+              <span className="text-teus-text_soft normal-case tracking-normal font-normal">
+                (se autocompleta al elegir chofer)
+              </span>
             </label>
             <select
               value={vehiculoId}
               onChange={(e) => setVehiculoId(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className={inputCls}
             >
               <option value="">Seleccionar vehículo...</option>
               {vehiculos.map((v) => (
                 <option key={v.id} value={v.id}>
-                  {v.patente} {v.marca || v.modelo ? `— ${v.marca || ""} ${v.modelo || ""}` : ""}
+                  {nombreVehiculo(v)}
+                  {v.marca || v.modelo ? ` — ${v.marca || ""} ${v.modelo || ""}` : ""}
                 </option>
               ))}
             </select>
@@ -600,19 +658,17 @@ function ModalInforme({
 
           {/* Tipo de equipo */}
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Tipo de equipo afectado *
-            </label>
+            <label className={labelCls}>Tipo de equipo afectado *</label>
             <div className="grid grid-cols-3 gap-2">
               {(["tractocamion", "semirremolque", "equipo_completo"] as const).map((tipo) => (
                 <button
                   key={tipo}
                   type="button"
                   onClick={() => setTipoEquipo(tipo)}
-                  className={`px-3 py-2 rounded-lg text-sm font-medium border-2 transition ${
+                  className={`px-3 py-2.5 rounded-lg text-sm font-semibold border-2 transition ${
                     tipoEquipo === tipo
-                      ? "border-blue-500 bg-blue-50 text-blue-700"
-                      : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
+                      ? "border-teus-accent bg-teus-accent/10 text-teus-accent"
+                      : "border-teus-border_light bg-teus-card_light text-teus-text_muted hover:border-teus-text_soft"
                   }`}
                 >
                   {TIPO_EQUIPO_LABEL[tipo]}
@@ -623,61 +679,56 @@ function ModalInforme({
 
           {/* Descripción */}
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Descripción del problema / novedad *
-            </label>
+            <label className={labelCls}>Descripción del problema / novedad *</label>
             <textarea
               value={descripcion}
               onChange={(e) => setDescripcion(e.target.value)}
               rows={5}
               placeholder="Ej: El chofer reporta un problema con el borne de la batería. Hace falta revisar para no quedar en ruta..."
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
+              className={`${inputCls} resize-y`}
             />
           </div>
 
           {/* Estado */}
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Estado
-            </label>
+            <label className={labelCls}>Estado</label>
             <select
               value={estado}
               onChange={(e) => setEstado(e.target.value as Informe["estado"])}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className={inputCls}
             >
-              <option value="pendiente">🟡 Pendiente</option>
-              <option value="en_proceso">🔵 En proceso</option>
-              <option value="solucionado">🟢 Solucionado</option>
-              <option value="cancelado">⚫ Cancelado</option>
+              <option value="pendiente">Pendiente</option>
+              <option value="en_proceso">En proceso</option>
+              <option value="solucionado">Solucionado</option>
+              <option value="cancelado">Cancelado</option>
             </select>
           </div>
 
-          {/* Observaciones de seguimiento */}
+          {/* Observaciones */}
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Observaciones / seguimiento
-            </label>
+            <label className={labelCls}>Observaciones / seguimiento</label>
             <textarea
               value={observaciones}
               onChange={(e) => setObservaciones(e.target.value)}
               rows={3}
               placeholder="Notas internas de seguimiento..."
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
+              className={`${inputCls} resize-y`}
             />
           </div>
         </div>
 
-        <div className="sticky bottom-0 bg-white border-t border-gray-200 px-5 py-3 flex justify-end gap-2">
+        {/* Footer */}
+        <div className="sticky bottom-0 bg-teus-card_light border-t border-teus-border_light px-6 py-4 flex justify-end gap-2">
           <button
             onClick={onClose}
-            className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 font-medium"
+            className="px-4 py-2 border border-teus-border_light rounded-lg text-teus-text_muted hover:bg-teus-hover_light font-semibold text-sm transition"
           >
             Cancelar
           </button>
           <button
             onClick={guardar}
             disabled={guardando}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-lg font-medium"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-teus-accent hover:bg-teus-accent-2 disabled:opacity-50 text-white rounded-lg font-semibold text-sm shadow-accent-glow transition"
           >
             {guardando ? "Guardando..." : esNuevo ? "Crear informe" : "Guardar cambios"}
           </button>
