@@ -28,6 +28,7 @@ import {
   Route,
   Shield,
   UserCog,
+  AlertCircle,
 } from "lucide-react";
 
 type NavItem = {
@@ -67,6 +68,7 @@ const navSections: NavSection[] = [
     items: [
       { href: "/vehiculos", label: "Vehículos", icon: Truck, roles: ["admin"] },
       { href: "/choferes", label: "Choferes", icon: Users, roles: ["admin"] },
+      { href: "/informes-flota", label: "Informes de Flota", icon: AlertCircle, roles: ["admin", "coordinador"] },
       { href: "/mantenimientos", label: "Mantenimientos", icon: Wrench, roles: ["admin", "coordinador"] },
       { href: "/habilitaciones", label: "Habilitaciones", icon: FileText, roles: ["admin", "coordinador"] },
     ],
