@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useUserRole } from "@/lib/supabase/useUserRole";
 import { ClipboardList, Plus, Download, Edit, X, Loader2, Search, Trash2, ChevronDown, ChevronUp, MessageCircle, Fuel, ArrowRightCircle, FileText } from "lucide-react";
@@ -11,6 +11,17 @@ type Vehiculo = { id: string; alias: string | null; chapa: string };
 type Cliente = { id: string; nombre: string };
 type EstacionCombustible = { id: string; nombre: string };
 type UsuarioPerfil = { id: string; nombre_completo: string | null; rol: string };
+
+type ViajePrefill = {
+  id: string;
+  fecha: string;
+  cliente_id: string | null;
+  chofer_id: string | null;
+  vehiculo_id: string | null;
+  nro_contenedor: string | null;
+  proveedor_combustible_id: string | null;
+  hoja_ruta_id: string | null;
+};
 
 type HojaRuta = {
   id: string;
@@ -98,6 +109,7 @@ function fmtVehiculo(v?: { alias: string | null; chapa: string } | null): string
 export default function HojasDeRutaPage() {
   const supabase = createClient();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { isAdmin } = useUserRole();
   const [hojas, setHojas] = useState<HojaRuta[]>([]);
   const [choferes, setChoferes] = useState<Chofer[]>([]);
@@ -108,6 +120,7 @@ export default function HojasDeRutaPage() {
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [editando, setEditando] = useState<HojaRuta | null>(null);
+  const [prefillViaje, setPrefillViaje] = useState<ViajePrefill | null>(null);
   const [guardando, setGuardando] = useState(false);
   const [showOpcionales, setShowOpcionales] = useState(false);
   const [filtroEstado, setFiltroEstado] = useState("todos");
@@ -170,6 +183,72 @@ export default function HojasDeRutaPage() {
 
   useEffect(() => { loadData(); }, []);
 
+  // Manejo de parámetros URL
+  // ?from_viaje=xxx → generar hoja a partir de un viaje (pre-llenar modal)
+  // ?hoja_id=xxx    → abrir hoja existente para editar
+  useEffect(() => {
+    const fromViaje = searchParams.get("from_viaje");
+    const hojaIdParam = searchParams.get("hoja_id");
+
+    if (fromViaje) {
+      (async () => {
+        const { data: viaje } = await supabase
+          .from("viajes")
+          .select("id, fecha, cliente_id, chofer_id, vehiculo_id, nro_contenedor, proveedor_combustible_id, hoja_ruta_id")
+          .eq("id", fromViaje)
+          .single();
+        if (viaje) {
+          if (viaje.hoja_ruta_id) {
+            // El viaje ya tiene hoja — abrir esa hoja para editar
+            const { data: hojaExistente } = await supabase
+              .from("hojas_de_ruta")
+              .select("*, chofer:chofer_id(nombre_completo, telefono), vehiculo:vehiculo_id(alias, chapa), cliente:cliente_id(nombre), estacion_combustible:estacion_combustible_id(nombre)")
+              .eq("id", viaje.hoja_ruta_id)
+              .single();
+            if (hojaExistente) {
+              abrirEditar(hojaExistente as unknown as HojaRuta);
+            }
+          } else {
+            // Nueva hoja desde viaje
+            resetForm();
+            setEditando(null);
+            setPrefillViaje(viaje as ViajePrefill);
+            await fetchProximoNumero();
+            setForm(f => ({
+              ...f,
+              cliente_id: viaje.cliente_id || "",
+              chofer_id: viaje.chofer_id || "",
+              vehiculo_id: viaje.vehiculo_id || "",
+              nro_contenedor: viaje.nro_contenedor || "",
+              retiro_fecha: viaje.fecha?.split("T")[0] || "",
+              estacion_combustible_id: viaje.proveedor_combustible_id || "",
+            }));
+            // Si trae nro_contenedor lo mostramos en opcionales
+            if (viaje.nro_contenedor) setShowOpcionales(true);
+            setModalOpen(true);
+          }
+        }
+        router.replace("/hojas-de-ruta");
+      })();
+      return;
+    }
+
+    if (hojaIdParam) {
+      (async () => {
+        const { data: hoja } = await supabase
+          .from("hojas_de_ruta")
+          .select("*, chofer:chofer_id(nombre_completo, telefono), vehiculo:vehiculo_id(alias, chapa), cliente:cliente_id(nombre), estacion_combustible:estacion_combustible_id(nombre)")
+          .eq("id", hojaIdParam)
+          .single();
+        if (hoja) {
+          abrirEditar(hoja as unknown as HojaRuta);
+        }
+        router.replace("/hojas-de-ruta");
+      })();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
   function resetForm() {
     setForm({
       cliente_id: "", chofer_id: "", vehiculo_id: "",
@@ -181,6 +260,7 @@ export default function HojasDeRutaPage() {
       estacion_combustible_id: "",
     });
     setShowOpcionales(false);
+    setPrefillViaje(null);
   }
 
   async function abrirNueva() {
@@ -215,6 +295,7 @@ export default function HojasDeRutaPage() {
     const tieneOp = h.nro_contenedor || h.tipo_operacion || h.peso_kg || h.devolucion_lugar || h.instrucciones;
     setShowOpcionales(!!tieneOp);
     setEditando(h);
+    setPrefillViaje(null);
     setProximoNumero(h.numero);
     setModalOpen(true);
   }
@@ -253,6 +334,7 @@ export default function HojasDeRutaPage() {
         devolucion_fecha: form.devolucion_fecha || null,
         instrucciones: form.instrucciones || null,
         estacion_combustible_id: form.estacion_combustible_id || null,
+        viaje_id: prefillViaje?.id || null,
       };
 
       let hojaGuardada: HojaRuta;
@@ -270,6 +352,10 @@ export default function HojasDeRutaPage() {
           .single();
         if (error) throw error;
         hojaGuardada = data as unknown as HojaRuta;
+        // Si venimos desde un viaje, actualizar ese viaje para vincular la hoja
+        if (prefillViaje?.id) {
+          await supabase.from("viajes").update({ hoja_ruta_id: hojaGuardada.id }).eq("id", prefillViaje.id);
+        }
       }
       await loadData();
       cerrarModal();
@@ -724,16 +810,33 @@ export default function HojasDeRutaPage() {
             <div className="flex items-center justify-between mb-5 pb-3 border-b">
               <div>
                 <h2 className="text-xl font-black text-teus-text_dark">
-                  {editando ? `Editar hoja ${editando.numero}` : "Nueva hoja de ruta"}
+                  {editando
+                    ? `Editar hoja ${editando.numero}`
+                    : prefillViaje
+                      ? "Generar hoja de ruta desde viaje"
+                      : "Nueva hoja de ruta"}
                 </h2>
                 <p className="text-xs text-teus-text_muted mt-1">
-                  {editando ? `Última modificación: ${fmtFecha(editando.fecha_emision)}` : `Se asignará el N° ${proximoNumero || "..."} al guardar`}
+                  {editando
+                    ? `Última modificación: ${fmtFecha(editando.fecha_emision)}`
+                    : `Se asignará el N° ${proximoNumero || "..."} al guardar`}
                 </p>
               </div>
               <button onClick={cerrarModal} className="text-teus-text_muted hover:text-teus-text_dark">
                 <X className="w-5 h-5" />
               </button>
             </div>
+
+            {prefillViaje && (
+              <div className="mb-4 bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-900 flex items-start gap-2">
+                <FileText className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                <div>
+                  Esta hoja se está generando a partir de un viaje. Se precargaron cliente, chofer, vehículo y contenedor.
+                  Al guardar, ambos quedarán vinculados automáticamente.
+                  <strong className="block mt-1">Completá puerto de retiro, dirección de entrega y estación de combustible si corresponde.</strong>
+                </div>
+              </div>
+            )}
 
             <div className="space-y-4">
               <div>
@@ -960,7 +1063,7 @@ export default function HojasDeRutaPage() {
               </button>
               <button onClick={() => guardar(false)} disabled={guardando}
                 className="bg-white border-2 border-teus-accent-dark text-teus-accent-dark hover:bg-teus-bg_soft px-4 py-2.5 rounded-lg text-sm font-bold">
-                {guardando ? <Loader2 className="w-4 h-4 animate-spin inline" /> : "Guardar"}
+                {guardando ? <Loader2 className="w-4 h-4 animate-spin inline" /> : prefillViaje ? "Guardar y vincular" : "Guardar"}
               </button>
               <button onClick={() => guardar(true)} disabled={guardando}
                 className="bg-teus-accent hover:bg-teus-accent-2 text-white px-4 py-2.5 rounded-lg text-sm font-bold flex items-center gap-2">
