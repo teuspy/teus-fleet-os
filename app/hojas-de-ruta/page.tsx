@@ -1,13 +1,15 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useUserRole } from "@/lib/supabase/useUserRole";
-import { ClipboardList, Plus, Download, Edit, X, Loader2, Search, Trash2, ChevronDown, ChevronUp, MessageCircle } from "lucide-react";
+import { ClipboardList, Plus, Download, Edit, X, Loader2, Search, Trash2, ChevronDown, ChevronUp, MessageCircle, Fuel, ArrowRightCircle, FileText } from "lucide-react";
 import jsPDF from "jspdf";
 
 type Chofer = { id: string; nombre_completo: string; telefono: string | null };
 type Vehiculo = { id: string; alias: string | null; chapa: string };
 type Cliente = { id: string; nombre: string };
+type EstacionCombustible = { id: string; nombre: string };
 type UsuarioPerfil = { id: string; nombre_completo: string | null; rol: string };
 
 type HojaRuta = {
@@ -36,9 +38,12 @@ type HojaRuta = {
   creado_por: string | null;
   modificado_por: string | null;
   modificado_at: string | null;
+  estacion_combustible_id: string | null;
+  viaje_id: string | null;
   chofer?: { nombre_completo: string; telefono: string | null } | null;
   vehiculo?: { alias: string | null; chapa: string } | null;
   cliente?: { nombre: string } | null;
+  estacion_combustible?: { nombre: string } | null;
 };
 
 const TIPOS_CONTENEDOR = ["DRY 20'", "DRY 40'", "DRY 40' HC", "Reefer 20'", "Reefer 40'", "Open Top", "Flat Rack", "Carga suelta"];
@@ -92,11 +97,13 @@ function fmtVehiculo(v?: { alias: string | null; chapa: string } | null): string
 
 export default function HojasDeRutaPage() {
   const supabase = createClient();
+  const router = useRouter();
   const { isAdmin } = useUserRole();
   const [hojas, setHojas] = useState<HojaRuta[]>([]);
   const [choferes, setChoferes] = useState<Chofer[]>([]);
   const [vehiculos, setVehiculos] = useState<Vehiculo[]>([]);
   const [clientes, setClientes] = useState<Cliente[]>([]);
+  const [estaciones, setEstaciones] = useState<EstacionCombustible[]>([]);
   const [perfiles, setPerfiles] = useState<Map<string, UsuarioPerfil>>(new Map());
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
@@ -126,25 +133,28 @@ export default function HojasDeRutaPage() {
     devolucion_lugar: "",
     devolucion_fecha: "",
     instrucciones: "",
+    estacion_combustible_id: "",
   });
 
   const esChoferExterno = form.chofer_id === CHOFER_EXTERNO_VALUE;
 
   async function loadData() {
     setLoading(true);
-    const [hojasRes, choferesRes, vehiculosRes, clientesRes, perfilesRes] = await Promise.all([
+    const [hojasRes, choferesRes, vehiculosRes, clientesRes, estacionesRes, perfilesRes] = await Promise.all([
       supabase.from("hojas_de_ruta")
-        .select("*, chofer:chofer_id(nombre_completo, telefono), vehiculo:vehiculo_id(alias, chapa), cliente:cliente_id(nombre)")
+        .select("*, chofer:chofer_id(nombre_completo, telefono), vehiculo:vehiculo_id(alias, chapa), cliente:cliente_id(nombre), estacion_combustible:estacion_combustible_id(nombre)")
         .order("created_at", { ascending: false }),
       supabase.from("choferes").select("id, nombre_completo, telefono").eq("activo", true).order("nombre_completo"),
       supabase.from("vehiculos").select("id, alias, chapa").eq("activo", true).eq("tipo", "tracto").order("alias"),
       supabase.from("clientes").select("id, nombre").eq("activo", true).order("nombre"),
+      supabase.from("proveedores").select("id, nombre").eq("activo", true).eq("tipo", "combustible").order("nombre"),
       supabase.from("usuarios_perfil").select("id, nombre_completo, rol"),
     ]);
     setHojas((hojasRes.data as unknown as HojaRuta[]) || []);
     setChoferes(choferesRes.data || []);
     setVehiculos(vehiculosRes.data || []);
     setClientes(clientesRes.data || []);
+    setEstaciones(estacionesRes.data || []);
     if (perfilesRes.data) {
       const m = new Map<string, UsuarioPerfil>();
       perfilesRes.data.forEach((p: any) => m.set(p.id, p));
@@ -168,6 +178,7 @@ export default function HojasDeRutaPage() {
       retiro_lugar: "", retiro_fecha: "",
       entrega_direccion: "", entrega_fecha: "", entrega_hora: "",
       devolucion_lugar: "", devolucion_fecha: "", instrucciones: "",
+      estacion_combustible_id: "",
     });
     setShowOpcionales(false);
   }
@@ -199,6 +210,7 @@ export default function HojasDeRutaPage() {
       devolucion_lugar: h.devolucion_lugar || "",
       devolucion_fecha: h.devolucion_fecha?.split("T")[0] || "",
       instrucciones: h.instrucciones || "",
+      estacion_combustible_id: h.estacion_combustible_id || "",
     });
     const tieneOp = h.nro_contenedor || h.tipo_operacion || h.peso_kg || h.devolucion_lugar || h.instrucciones;
     setShowOpcionales(!!tieneOp);
@@ -240,20 +252,21 @@ export default function HojasDeRutaPage() {
         devolucion_lugar: form.devolucion_lugar || null,
         devolucion_fecha: form.devolucion_fecha || null,
         instrucciones: form.instrucciones || null,
+        estacion_combustible_id: form.estacion_combustible_id || null,
       };
 
       let hojaGuardada: HojaRuta;
       if (editando) {
         const { data, error } = await supabase.from("hojas_de_ruta")
           .update(payload).eq("id", editando.id)
-          .select("*, chofer:chofer_id(nombre_completo, telefono), vehiculo:vehiculo_id(alias, chapa), cliente:cliente_id(nombre)")
+          .select("*, chofer:chofer_id(nombre_completo, telefono), vehiculo:vehiculo_id(alias, chapa), cliente:cliente_id(nombre), estacion_combustible:estacion_combustible_id(nombre)")
           .single();
         if (error) throw error;
         hojaGuardada = data as unknown as HojaRuta;
       } else {
         const { data, error } = await supabase.from("hojas_de_ruta")
           .insert({ ...payload, numero: proximoNumero })
-          .select("*, chofer:chofer_id(nombre_completo, telefono), vehiculo:vehiculo_id(alias, chapa), cliente:cliente_id(nombre)")
+          .select("*, chofer:chofer_id(nombre_completo, telefono), vehiculo:vehiculo_id(alias, chapa), cliente:cliente_id(nombre), estacion_combustible:estacion_combustible_id(nombre)")
           .single();
         if (error) throw error;
         hojaGuardada = data as unknown as HojaRuta;
@@ -273,6 +286,14 @@ export default function HojasDeRutaPage() {
     const { error } = await supabase.from("hojas_de_ruta").update({ estado: "anulada" }).eq("id", h.id);
     if (error) { alert("Error: " + error.message); return; }
     loadData();
+  }
+
+  function convertirEnViaje(h: HojaRuta) {
+    if (h.viaje_id) {
+      router.push(`/viajes?viaje_id=${h.viaje_id}`);
+      return;
+    }
+    router.push(`/viajes?from_hoja=${h.id}`);
   }
 
   function abrirWhatsApp(h: HojaRuta) {
@@ -298,6 +319,9 @@ export default function HojasDeRutaPage() {
     if (h.tipo_contenedor) partes.push(`*Contenedor:* ${h.tipo_contenedor}`);
     partes.push(`*Retiro:* ${h.retiro_lugar || "-"}${h.retiro_fecha ? " (" + fmtFecha(h.retiro_fecha) + ")" : ""}`);
     partes.push(`*${labelEntrega}:* ${h.entrega_direccion || "-"}${h.entrega_fecha ? " (" + fmtFecha(h.entrega_fecha) + (h.entrega_hora ? " · " + fmtHora(h.entrega_hora) + " hs" : "") + ")" : ""}`);
+    if (h.estacion_combustible?.nombre) {
+      partes.push(`*⛽ Cargar combustible en:* ${h.estacion_combustible.nombre}`);
+    }
     partes.push(``);
     partes.push(`Te adjunto el PDF a continuación.`);
 
@@ -433,6 +457,23 @@ export default function HojasDeRutaPage() {
     doc.text(direccionLines, 15, 133);
 
     let y = 145;
+
+    // ⛽ CARGAR COMBUSTIBLE EN — bloque nuevo (solo si tiene estación)
+    if (h.estacion_combustible?.nombre) {
+      doc.line(0, y, W, y);
+      doc.setFillColor(255, 243, 199); // amarillo claro
+      doc.rect(0, y, W, 18, "F");
+      doc.setFillColor(245, 158, 11); // borde naranja
+      doc.rect(0, y, 3, 18, "F");
+      doc.setTextColor(146, 64, 14); // naranja oscuro
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.text("CARGAR COMBUSTIBLE EN", 15, y + 7);
+      doc.setFontSize(14);
+      doc.text(h.estacion_combustible.nombre, 15, y + 14);
+      y += 18;
+    }
+
     if (h.devolucion_lugar) {
       doc.line(0, y, W, y);
       doc.setFillColor(255, 255, 255);
@@ -594,6 +635,14 @@ export default function HojasDeRutaPage() {
                       <td className="p-3 font-bold text-teus-accent-dark font-mono">
                         <div className="flex items-center flex-wrap gap-y-1">
                           <span>{h.numero}</span>
+                          {h.viaje_id && (
+                            <span
+                              title="Esta hoja ya fue convertida en viaje"
+                              className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full border bg-blue-100 text-blue-800 border-blue-300 ml-1"
+                            >
+                              <FileText className="w-2.5 h-2.5" /> VIAJE
+                            </span>
+                          )}
                           {isAdmin && creadorEsCoord && creador && (
                             <ChipCoordinador perfil={creador} tipo="creado" />
                           )}
@@ -652,6 +701,11 @@ export default function HojasDeRutaPage() {
 
       {isAdmin && hojasFiltradas.length > 0 && (
         <div className="text-xs text-teus-text_soft mt-4 px-1 flex items-center gap-3 flex-wrap">
+          <span className="inline-flex items-center gap-1">
+            <span className="inline-block px-1.5 py-0.5 bg-blue-100 text-blue-800 border border-blue-300 rounded-full font-bold text-[10px]">VIAJE</span>
+            = hoja ya convertida en viaje
+          </span>
+          <span className="mx-2">·</span>
           <span className="inline-flex items-center gap-1">
             <span className="inline-block px-1.5 py-0.5 bg-amber-100 text-amber-800 border border-amber-300 rounded-full font-bold text-[10px]">✨ chip</span>
             = creado por el coordinador
@@ -795,6 +849,24 @@ export default function HojasDeRutaPage() {
                 </div>
               </div>
 
+              {/* ⛽ CARGAR COMBUSTIBLE EN (opcional) */}
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <Fuel className="w-4 h-4 text-amber-700" />
+                  <div className="text-[11px] uppercase font-bold text-amber-800 tracking-widest">Combustible (opcional)</div>
+                </div>
+                <label className="text-xs font-bold text-amber-900">Cargar combustible en</label>
+                <select value={form.estacion_combustible_id}
+                  onChange={e => setForm({ ...form, estacion_combustible_id: e.target.value })}
+                  className="w-full bg-white border border-amber-300 rounded-lg px-3 py-2 text-sm mt-1">
+                  <option value="">Sin estación asignada</option>
+                  {estaciones.map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
+                </select>
+                <p className="text-[10px] text-amber-700 mt-1.5">
+                  Si elegís una estación, aparece en el PDF que mandás al chofer. No incluye litros ni precio.
+                </p>
+              </div>
+
               <button type="button" onClick={() => setShowOpcionales(!showOpcionales)}
                 className="w-full flex items-center justify-center gap-2 py-2 text-xs text-teus-text_muted border border-dashed border-teus-border_light rounded-lg hover:bg-teus-bg_soft">
                 {showOpcionales ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
@@ -857,7 +929,31 @@ export default function HojasDeRutaPage() {
               )}
             </div>
 
-            <div className="flex justify-end gap-2 mt-6 pt-4 border-t">
+            <div className="flex justify-end gap-2 mt-6 pt-4 border-t flex-wrap">
+              {editando && (
+                <button
+                  onClick={() => convertirEnViaje(editando)}
+                  disabled={guardando}
+                  className={`px-4 py-2.5 rounded-lg text-sm font-bold flex items-center gap-2 transition-all ${
+                    editando.viaje_id
+                      ? "bg-blue-50 border-2 border-blue-500 text-blue-700 hover:bg-blue-100"
+                      : "bg-white border-2 border-teus-accent text-teus-accent hover:bg-teus-accent/5"
+                  }`}
+                  title={editando.viaje_id ? "Ver viaje vinculado" : "Convertir esta hoja en viaje"}
+                >
+                  {editando.viaje_id ? (
+                    <>
+                      <FileText className="w-4 h-4" />
+                      Ver viaje vinculado
+                    </>
+                  ) : (
+                    <>
+                      <ArrowRightCircle className="w-4 h-4" />
+                      Convertir en viaje
+                    </>
+                  )}
+                </button>
+              )}
               <button onClick={cerrarModal} disabled={guardando}
                 className="bg-white border border-teus-border_light hover:bg-teus-bg_soft text-teus-text_dark px-4 py-2.5 rounded-lg text-sm font-bold">
                 Cancelar
