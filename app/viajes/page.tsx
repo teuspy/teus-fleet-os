@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useUserRole } from "@/lib/supabase/useUserRole";
 import {
   Plus, Edit2, Trash2, X, ClipboardList, Search, Loader2,
-  Calendar, TrendingUp, DollarSign, Truck, MapPin, UserCog,
+  Calendar, TrendingUp, DollarSign, Truck, MapPin, UserCog, FileText,
 } from "lucide-react";
 type Vehiculo = { id: string; nombre_equipo: string; tipo: string; chapa: string };
 type Chofer = { id: string; nombre_completo: string; vehiculo_asignado_id?: string | null };
@@ -13,6 +13,20 @@ type Cliente = { id: string; nombre: string; credito_dias: number };
 type Ruta = { id: string; origen: string; destino: string; km_ida: number; km_vuelta: number; km_total: number };
 type Proveedor = { id: string; nombre: string; gs_por_litro: number | null };
 type UsuarioPerfil = { id: string; nombre_completo: string | null; rol: string };
+
+type HojaRutaPrefill = {
+  id: string;
+  numero: string;
+  cliente_id: string | null;
+  chofer_id: string | null;
+  vehiculo_id: string | null;
+  nro_contenedor: string | null;
+  retiro_fecha: string | null;
+  estacion_combustible_id: string | null;
+  estacion_combustible?: { nombre: string } | null;
+  viaje_id: string | null;
+};
+
 type Viaje = {
   id: string;
   fecha: string;
@@ -48,6 +62,7 @@ type Viaje = {
   tarifa_bruta_cliente_final: number;
   comision_externa: number;
   factura_id: string | null;
+  hoja_ruta_id: string | null;
   creado_por: string | null;
   modificado_por: string | null;
   modificado_at: string | null;
@@ -56,6 +71,7 @@ type Viaje = {
   chofer?: Chofer | null;
   cliente?: Cliente | null;
   cliente_final?: { nombre: string } | null;
+  hoja?: { id: string; numero: string } | null;
 };
 const MESES_ES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 function fmtGs(n: number) {
@@ -93,6 +109,7 @@ export default function ViajesPage() {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Viaje | null>(null);
+  const [prefillHoja, setPrefillHoja] = useState<HojaRutaPrefill | null>(null);
   const [search, setSearch] = useState("");
   const [filterEquipo, setFilterEquipo] = useState<string>("");
   const [filterEstado, setFilterEstado] = useState<string>("");
@@ -111,7 +128,7 @@ export default function ViajesPage() {
     ] = await Promise.all([
       supabase
         .from("viajes")
-        .select("*, vehiculo:vehiculo_id(id, nombre_equipo, tipo, chapa), chofer:chofer_id(id, nombre_completo), cliente:cliente_id(id, nombre, credito_dias), factura:factura_id(nro_factura), cliente_final:cliente_final_id(nombre)")
+        .select("*, vehiculo:vehiculo_id(id, nombre_equipo, tipo, chapa), chofer:chofer_id(id, nombre_completo), cliente:cliente_id(id, nombre, credito_dias), factura:factura_id(nro_factura), cliente_final:cliente_final_id(nombre), hoja:hoja_ruta_id(id, numero)")
         .gte("fecha", startDate)
         .lte("fecha", endDate)
         .order("fecha", { ascending: false }),
@@ -136,19 +153,81 @@ export default function ViajesPage() {
     setLoading(false);
   }
   useEffect(() => { loadData(); }, [year, month]);
+
+  // Manejo de parámetros URL
+  // ?new=1          → abrir modal vacío
+  // ?from_hoja=xxx  → convertir hoja de ruta en viaje (abre modal pre-llenado)
+  // ?viaje_id=xxx   → abrir modal para editar un viaje específico
   useEffect(() => {
-    if (searchParams.get("new") === "1") {
+    const newParam = searchParams.get("new");
+    const fromHoja = searchParams.get("from_hoja");
+    const viajeIdParam = searchParams.get("viaje_id");
+
+    if (newParam === "1") {
       setEditing(null);
+      setPrefillHoja(null);
       setShowModal(true);
       router.replace("/viajes");
+      return;
     }
-  }, [searchParams, router]);
+
+    if (fromHoja) {
+      (async () => {
+        const { data: hoja } = await supabase
+          .from("hojas_de_ruta")
+          .select("id, numero, cliente_id, chofer_id, vehiculo_id, nro_contenedor, retiro_fecha, estacion_combustible_id, viaje_id, estacion_combustible:estacion_combustible_id(nombre)")
+          .eq("id", fromHoja)
+          .single();
+        if (hoja) {
+          if (hoja.viaje_id) {
+            // Ya fue convertida — abrir el viaje existente
+            const { data: viajeExistente } = await supabase
+              .from("viajes")
+              .select("*, vehiculo:vehiculo_id(id, nombre_equipo, tipo, chapa), chofer:chofer_id(id, nombre_completo), cliente:cliente_id(id, nombre, credito_dias), factura:factura_id(nro_factura), cliente_final:cliente_final_id(nombre), hoja:hoja_ruta_id(id, numero)")
+              .eq("id", hoja.viaje_id)
+              .single();
+            if (viajeExistente) {
+              setEditing(viajeExistente as Viaje);
+              setPrefillHoja(null);
+              setShowModal(true);
+            } else {
+              alert("La hoja ya está convertida, pero no encontré el viaje. Puede estar en otro mes.");
+            }
+          } else {
+            // Nueva conversión — abrir modal pre-llenado
+            setEditing(null);
+            setPrefillHoja(hoja as unknown as HojaRutaPrefill);
+            setShowModal(true);
+          }
+        }
+        router.replace("/viajes");
+      })();
+      return;
+    }
+
+    if (viajeIdParam) {
+      (async () => {
+        const { data: viaje } = await supabase
+          .from("viajes")
+          .select("*, vehiculo:vehiculo_id(id, nombre_equipo, tipo, chapa), chofer:chofer_id(id, nombre_completo), cliente:cliente_id(id, nombre, credito_dias), factura:factura_id(nro_factura), cliente_final:cliente_final_id(nombre), hoja:hoja_ruta_id(id, numero)")
+          .eq("id", viajeIdParam)
+          .single();
+        if (viaje) {
+          setEditing(viaje as Viaje);
+          setPrefillHoja(null);
+          setShowModal(true);
+        }
+        router.replace("/viajes");
+      })();
+    }
+  }, [searchParams, router, supabase]);
+
   const filtered = useMemo(() => viajes.filter(v => {
     if (filterEquipo && v.vehiculo_id !== filterEquipo) return false;
     if (filterEstado && v.estado !== filterEstado) return false;
     if (search) {
       const q = search.toLowerCase();
-      const searchStr = `${v.vehiculo?.nombre_equipo || ""} ${v.chofer?.nombre_completo || ""} ${v.cliente?.nombre || ""} ${v.cliente_final?.nombre || ""} ${v.nro_contenedor || ""} ${v.factura?.nro_factura || ""} ${v.origen} ${v.destino}`.toLowerCase();
+      const searchStr = `${v.vehiculo?.nombre_equipo || ""} ${v.chofer?.nombre_completo || ""} ${v.cliente?.nombre || ""} ${v.cliente_final?.nombre || ""} ${v.nro_contenedor || ""} ${v.factura?.nro_factura || ""} ${v.hoja?.numero || ""} ${v.origen} ${v.destino}`.toLowerCase();
       if (!searchStr.includes(q)) return false;
     }
     return true;
@@ -170,6 +249,10 @@ export default function ViajesPage() {
       return;
     }
     if (!confirm(`¿Eliminar el viaje del ${v.fecha}?\n(${v.origen} → ${v.destino}, ${v.vehiculo?.nombre_equipo})\n\nEsta acción no se puede deshacer.`)) return;
+    // Si tenía hoja vinculada, desvincular primero para que la hoja quede como "sin viaje"
+    if (v.hoja_ruta_id) {
+      await supabase.from("hojas_de_ruta").update({ viaje_id: null }).eq("id", v.hoja_ruta_id);
+    }
     await supabase.from("viajes").delete().eq("id", v.id);
     loadData();
   }
@@ -205,7 +288,7 @@ export default function ViajesPage() {
           </p>
         </div>
         <button
-          onClick={() => { setEditing(null); setShowModal(true); }}
+          onClick={() => { setEditing(null); setPrefillHoja(null); setShowModal(true); }}
           className="bg-teus-accent hover:bg-teus-accent-2 text-white font-bold px-5 py-2.5 rounded-lg shadow-accent-glow transition-all hover:-translate-y-0.5 text-sm flex items-center gap-2"
         >
           <Plus className="w-4 h-4" />
@@ -262,7 +345,7 @@ export default function ViajesPage() {
                 : "No hay viajes que coincidan con los filtros"}
             </div>
             {viajes.length === 0 && (
-              <button onClick={() => { setEditing(null); setShowModal(true); }} className="bg-teus-accent hover:bg-teus-accent-2 text-white font-bold px-4 py-2 rounded-lg shadow-accent-glow text-sm inline-flex items-center gap-2">
+              <button onClick={() => { setEditing(null); setPrefillHoja(null); setShowModal(true); }} className="bg-teus-accent hover:bg-teus-accent-2 text-white font-bold px-4 py-2 rounded-lg shadow-accent-glow text-sm inline-flex items-center gap-2">
                 <Plus className="w-4 h-4" /> Cargar primer viaje
               </button>
             )}
@@ -298,6 +381,14 @@ export default function ViajesPage() {
                       <td className="px-3 py-3 text-teus-text_dark font-semibold text-xs whitespace-nowrap">
                         <div className="flex items-center flex-wrap gap-y-1">
                           {(() => { const [y,m,d] = v.fecha.split("T")[0].split("-"); return <span>{d}/{m}</span>; })()}
+                          {v.hoja?.numero && (
+                            <span
+                              title={`Vinculado a la hoja de ruta ${v.hoja.numero}`}
+                              className="inline-flex items-center gap-0.5 text-[9px] font-bold font-mono px-1.5 py-0.5 rounded-full border bg-blue-100 text-blue-800 border-blue-300 ml-1"
+                            >
+                              <FileText className="w-2.5 h-2.5" /> {v.hoja.numero}
+                            </span>
+                          )}
                           {isAdmin && creadorEsCoord && creador && (
                             <ChipCoordinador perfil={creador} tipo="creado" />
                           )}
@@ -350,7 +441,7 @@ export default function ViajesPage() {
                       </td>
                       <td className="px-3 py-3 text-right">
                         <div className="inline-flex gap-1">
-                          <button onClick={() => { setEditing(v); setShowModal(true); }} className="p-1.5 rounded-lg hover:bg-teus-accent/10 text-teus-text_muted hover:text-teus-accent transition" title="Editar"><Edit2 className="w-4 h-4" /></button>
+                          <button onClick={() => { setEditing(v); setPrefillHoja(null); setShowModal(true); }} className="p-1.5 rounded-lg hover:bg-teus-accent/10 text-teus-text_muted hover:text-teus-accent transition" title="Editar"><Edit2 className="w-4 h-4" /></button>
                           {isAdmin && (
                             <button onClick={() => deleteViaje(v)} className="p-1.5 rounded-lg text-teus-text_muted hover:text-teus-danger hover:bg-teus-danger-light transition" title="Eliminar"><Trash2 className="w-4 h-4" /></button>
                           )}
@@ -366,8 +457,13 @@ export default function ViajesPage() {
       </div>
       <div className="text-xs text-teus-text_soft mt-4 px-1 flex items-center gap-3 flex-wrap">
         <span>Mostrando {filtered.length} viaje{filtered.length !== 1 ? "s" : ""} · {MESES_ES[month-1]} {year}</span>
+        <span className="inline-flex items-center gap-1 text-[10px] text-teus-text_muted">
+          <span className="inline-block px-1.5 py-0.5 bg-blue-100 text-blue-800 border border-blue-300 rounded-full font-bold">HR-xxx</span>
+          = hoja de ruta vinculada
+        </span>
         {isAdmin && (
           <span className="inline-flex items-center gap-1 text-[10px] text-teus-text_muted">
+            <span className="mx-2">·</span>
             <span className="inline-block px-1.5 py-0.5 bg-amber-100 text-amber-800 border border-amber-300 rounded-full font-bold">✨ chip</span>
             = creado por el coordinador
             <span className="mx-2">·</span>
@@ -379,14 +475,15 @@ export default function ViajesPage() {
       {showModal && (
         <ViajeModal
           viaje={editing}
+          prefillHoja={prefillHoja}
           vehiculos={vehiculos}
           choferes={choferes}
           clientes={clientes}
           rutas={rutas}
           proveedores={proveedores}
           isAdmin={isAdmin}
-          onClose={() => setShowModal(false)}
-          onSaved={() => { setShowModal(false); loadData(); }}
+          onClose={() => { setShowModal(false); setPrefillHoja(null); }}
+          onSaved={() => { setShowModal(false); setPrefillHoja(null); loadData(); }}
         />
       )}
     </div>
@@ -407,9 +504,10 @@ function KpiCard({ label, value, icon: Icon, sub }: { label: string; value: stri
   );
 }
 function ViajeModal({
-  viaje, vehiculos, choferes, clientes, rutas, proveedores, isAdmin, onClose, onSaved,
+  viaje, prefillHoja, vehiculos, choferes, clientes, rutas, proveedores, isAdmin, onClose, onSaved,
 }: {
   viaje: Viaje | null;
+  prefillHoja: HojaRutaPrefill | null;
   vehiculos: Vehiculo[];
   choferes: Chofer[];
   clientes: Cliente[];
@@ -420,17 +518,18 @@ function ViajeModal({
   onSaved: () => void;
 }) {
   const supabase = createClient();
+  const router = useRouter();
   const [form, setForm] = useState({
-    fecha: viaje?.fecha || new Date().toISOString().split("T")[0],
-    vehiculo_id: viaje?.vehiculo_id || "",
-    chofer_id: viaje?.chofer_id || "",
-    cliente_id: viaje?.cliente_id || "",
+    fecha: viaje?.fecha || prefillHoja?.retiro_fecha?.split("T")[0] || new Date().toISOString().split("T")[0],
+    vehiculo_id: viaje?.vehiculo_id || prefillHoja?.vehiculo_id || "",
+    chofer_id: viaje?.chofer_id || prefillHoja?.chofer_id || "",
+    cliente_id: viaje?.cliente_id || prefillHoja?.cliente_id || "",
     ruta_id: viaje?.ruta_id || "",
-    nro_contenedor: viaje?.nro_contenedor || "",
+    nro_contenedor: viaje?.nro_contenedor || prefillHoja?.nro_contenedor || "",
     origen: viaje?.origen || "",
     destino: viaje?.destino || "",
     km_viaje: viaje?.km_viaje || 0,
-    proveedor_combustible_id: viaje?.proveedor_combustible_id || "",
+    proveedor_combustible_id: viaje?.proveedor_combustible_id || prefillHoja?.estacion_combustible_id || "",
     litros: viaje?.litros || 0,
     gs_por_litro: viaje?.gs_por_litro || 0,
     viatico: viaje?.viatico || 0,
@@ -451,12 +550,25 @@ function ViajeModal({
     cliente_final_id: viaje?.cliente_final_id || "",
     tarifa_bruta_cliente_final: viaje?.tarifa_bruta_cliente_final || 0,
     comision_externa: viaje?.comision_externa || 0,
+    hoja_ruta_id: viaje?.hoja_ruta_id || prefillHoja?.id || null,
   });
   const [tieneClienteFinal, setTieneClienteFinal] = useState<boolean>(!!viaje?.cliente_final_id);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rutaSearch, setRutaSearch] = useState("");
   const [idaYVuelta, setIdaYVuelta] = useState(true);
+
+  // Si venimos desde hoja → obtener precio del combustible del proveedor pre-llenado
+  useEffect(() => {
+    if (prefillHoja?.estacion_combustible_id && !viaje) {
+      const p = proveedores.find(x => x.id === prefillHoja.estacion_combustible_id);
+      if (p?.gs_por_litro) {
+        setForm(f => ({ ...f, gs_por_litro: p.gs_por_litro || f.gs_por_litro }));
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   function onRutaChange(rutaId: string) {
     const r = rutas.find(x => x.id === rutaId);
     if (r) {
@@ -473,6 +585,18 @@ function ViajeModal({
     const p = proveedores.find(x => x.id === provId);
     setForm(f => ({ ...f, proveedor_combustible_id: provId, gs_por_litro: p?.gs_por_litro || f.gs_por_litro }));
   }
+
+  function generarHojaDeRuta() {
+    if (viaje?.hoja_ruta_id && viaje.hoja?.id) {
+      router.push(`/hojas-de-ruta?hoja_id=${viaje.hoja.id}`);
+      return;
+    }
+    if (viaje?.id) {
+      router.push(`/hojas-de-ruta?from_viaje=${viaje.id}`);
+      return;
+    }
+  }
+
   const costoCombustible = form.litros * form.gs_por_litro;
   const utilidadBruta = form.vehiculo_externo_id === "TL"
     ? (form.precio_flete || 0) - (form.precio_pagado_al_externo || 0) + (form.comision_recibida || 0) - (form.insumos_estacion_monto || 0) + (form.ingresos_extras_monto || 0)
@@ -520,14 +644,22 @@ function ViajeModal({
       cliente_final_id: tieneClienteFinal && form.cliente_final_id ? form.cliente_final_id : null,
       tarifa_bruta_cliente_final: tieneClienteFinal ? (form.tarifa_bruta_cliente_final || 0) : 0,
       comision_externa: tieneClienteFinal ? (form.comision_externa || 0) : 0,
+      hoja_ruta_id: form.hoja_ruta_id || null,
     };
     try {
+      let viajeIdGuardado: string | null = null;
       if (viaje) {
         const { error } = await supabase.from("viajes").update(payload).eq("id", viaje.id);
         if (error) throw error;
+        viajeIdGuardado = viaje.id;
       } else {
-        const { error } = await supabase.from("viajes").insert(payload);
+        const { data, error } = await supabase.from("viajes").insert(payload).select("id").single();
         if (error) throw error;
+        viajeIdGuardado = data?.id || null;
+      }
+      // Si venimos desde una hoja de ruta, actualizar la hoja para vincular el viaje
+      if (viajeIdGuardado && form.hoja_ruta_id) {
+        await supabase.from("hojas_de_ruta").update({ viaje_id: viajeIdGuardado }).eq("id", form.hoja_ruta_id);
       }
       onSaved();
     } catch (err: any) {
@@ -544,18 +676,49 @@ function ViajeModal({
         <div className="flex items-center justify-between p-6 border-b border-teus-border_light sticky top-0 bg-white z-10">
           <div>
             <h2 className="text-lg font-bold text-teus-text_dark">
-              {viaje ? "Editar Viaje" : "Nuevo Viaje"}
+              {viaje ? "Editar Viaje" : prefillHoja ? `Convertir hoja ${prefillHoja.numero} en viaje` : "Nuevo Viaje"}
             </h2>
             <p className="text-xs text-teus-text_muted mt-0.5">
-              {isAdmin
-                ? "Los cálculos de utilidad se hacen automáticamente"
-                : "Cargá la operación. El precio del flete y utilidad los completa el administrador."}
+              {prefillHoja
+                ? "Se precargaron cliente, chofer, vehículo y contenedor desde la hoja. Completá flete, combustible y viático."
+                : isAdmin
+                  ? "Los cálculos de utilidad se hacen automáticamente"
+                  : "Cargá la operación. El precio del flete y utilidad los completa el administrador."}
             </p>
           </div>
           <button onClick={onClose} className="p-2 rounded-lg hover:bg-teus-hover_light text-teus-text_muted hover:text-teus-text_dark transition">
             <X className="w-5 h-5" />
           </button>
         </div>
+        {prefillHoja && (
+          <div className="mx-6 mt-4 bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-900 flex items-start gap-2">
+            <FileText className="w-4 h-4 flex-shrink-0 mt-0.5" />
+            <div>
+              Este viaje se está creando a partir de la hoja de ruta <strong className="font-mono">{prefillHoja.numero}</strong>.
+              Al guardar, ambos quedarán vinculados automáticamente.
+              {prefillHoja.estacion_combustible?.nombre && (
+                <div className="mt-1">⛽ Estación de combustible indicada en la hoja: <strong>{prefillHoja.estacion_combustible.nombre}</strong></div>
+              )}
+            </div>
+          </div>
+        )}
+        {viaje?.hoja?.numero && !prefillHoja && (
+          <div className="mx-6 mt-4 bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-900 flex items-center justify-between gap-2">
+            <div className="flex items-start gap-2">
+              <FileText className="w-4 h-4 flex-shrink-0 mt-0.5" />
+              <div>
+                Este viaje tiene vinculada la hoja de ruta <strong className="font-mono">{viaje.hoja.numero}</strong>.
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => viaje.hoja && router.push(`/hojas-de-ruta?hoja_id=${viaje.hoja.id}`)}
+              className="text-blue-700 hover:text-blue-900 font-bold underline text-xs whitespace-nowrap"
+            >
+              Ver hoja →
+            </button>
+          </div>
+        )}
         {viaje?.factura_id && isAdmin && (
           <div className="mx-6 mt-4 bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-900">
             📄 Este viaje está vinculado a la factura <strong className="font-mono">{viaje.factura?.nro_factura || viaje.factura_id}</strong>. Si querés desvincularlo, editá la factura y sacá el check de este viaje.
@@ -962,13 +1125,28 @@ function ViajeModal({
               {error}
             </div>
           )}
-          <div className="flex gap-3 pt-2">
+          <div className="flex gap-3 pt-2 flex-wrap">
+            {viaje && (
+              <button
+                type="button"
+                onClick={generarHojaDeRuta}
+                className={`px-4 py-2.5 rounded-lg text-sm font-bold flex items-center gap-2 transition-all ${
+                  viaje.hoja_ruta_id
+                    ? "bg-blue-50 border-2 border-blue-500 text-blue-700 hover:bg-blue-100"
+                    : "bg-white border-2 border-teus-accent text-teus-accent hover:bg-teus-accent/5"
+                }`}
+                title={viaje.hoja_ruta_id ? "Ver hoja de ruta vinculada" : "Generar hoja de ruta desde este viaje"}
+              >
+                <FileText className="w-4 h-4" />
+                {viaje.hoja_ruta_id ? `Ver hoja ${viaje.hoja?.numero || ""}` : "Generar hoja de ruta"}
+              </button>
+            )}
             <button type="button" onClick={onClose} className="flex-1 border border-teus-border_light text-teus-text_muted py-2.5 rounded-lg font-semibold text-sm hover:bg-teus-hover_light transition">
               Cancelar
             </button>
             <button type="submit" disabled={saving} className="flex-1 bg-teus-accent hover:bg-teus-accent-2 text-white py-2.5 rounded-lg font-bold text-sm shadow-accent-glow transition disabled:opacity-50 flex items-center justify-center gap-2">
               {saving && <Loader2 className="w-4 h-4 animate-spin" />}
-              {viaje ? "Guardar cambios" : "Crear viaje"}
+              {viaje ? "Guardar cambios" : prefillHoja ? "Crear viaje y vincular" : "Crear viaje"}
             </button>
           </div>
         </form>
