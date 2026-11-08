@@ -1,6 +1,5 @@
 "use client";
-export const dynamic = 'force-dynamic';
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useUserRole } from "@/lib/supabase/useUserRole";
@@ -107,7 +106,7 @@ function fmtVehiculo(v?: { alias: string | null; chapa: string } | null): string
   return alias || chapa || "-";
 }
 
-export default function HojasDeRutaPage() {
+function HojasDeRutaPageContent() {
   const supabase = createClient();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -1076,5 +1075,13 @@ export default function HojasDeRutaPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function HojasDeRutaPage() {
+  return (
+    <Suspense fallback={<div className="p-16 text-center text-teus-text_muted">Cargando...</div>}>
+      <HojasDeRutaPageContent />
+    </Suspense>
   );
 }
